@@ -188,8 +188,9 @@ Run `cargo fmt --all --check`,
 `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and
 `cargo test --workspace --all-features`. Default-feature tests exercise the
 credential-free build. HTTP adapter behavior is fixture-tested, not live-provider
-certified. Rust 1.85 remains the declared MSRV; verification used the installed
-compiler, not a separate 1.85 toolchain.
+certified. The locked workspace has also been tested with the dedicated Rust
+1.85.0 Windows toolchain. CI covers stable and 1.85.0 on Windows and Linux;
+the first hosted matrix run is still pending. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 Next: implement the registered read-only repository tool boundary, attach compiler/
 test validators with explicit authorization, evaluate planner quality on real tasks,

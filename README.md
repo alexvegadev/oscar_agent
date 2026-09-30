@@ -196,8 +196,9 @@ Checked items describe the implemented hybrid proposal slice. Broader agent feat
 
 ### Foundation and release policies
 
-- [ ] Complete license, contribution, conduct, and security policies.
-- [ ] Establish CI and verify the declared MSRV on a dedicated toolchain.
+- [x] Align Apache-2.0 license metadata and add contribution, conduct, and security policies.
+- [x] Add Linux/Windows CI for stable and Rust 1.85.0; verify the MSRV locally.
+- [ ] Confirm the first hosted CI matrix run after publishing the workflow.
 - [ ] Review dependency licensing and public API compatibility.
 
 ### Safe repository tools and end-to-end changes
@@ -240,6 +241,12 @@ cargo test --workspace --all-features
 cargo test --workspace
 ```
 
+The [CI workflow](.github/workflows/ci.yml) checks formatting and Clippy, plus
+default/all-feature tests on Linux and Windows with stable and Rust 1.85.0.
+Builds use the committed lockfile (`--locked`). See [CONTRIBUTING.md](CONTRIBUTING.md)
+for toolchain setup and the matching local commands. The Rust 1.85.0 all-feature
+suite has passed locally on Windows; hosted Linux/Windows CI still needs its first run.
+
 Tests use deterministic mocks and, with HTTP enabled, loopback fixtures. They do not require real API credentials or model downloads. The existing prototype command remains available:
 
 ```bash
@@ -256,11 +263,20 @@ That command is a CLI scaffold; use `cargo test` to run the Rust test suite.
 - [Delivery record and verification results](docs/hybrid-delivery.md)
 - [Generated example plan](examples/hybrid-plan/PLAN.md)
 - [Contributor and agent working agreements](AGENTS.md)
+- [Contribution guide](CONTRIBUTING.md)
+- [Community conduct](CODE_OF_CONDUCT.md)
+- [Security reporting](SECURITY.md)
+- [Foundation and MSRV decision](docs/adr/0003-foundation-and-msrv.md)
 
 ## Contributing
 
-Start with a focused issue or scoped change. Inspect existing code and tests, preserve capability boundaries, and add meaningful failure/limit tests. Document user-visible behavior and distinguish implemented features from roadmap goals. Read [AGENTS.md](AGENTS.md) before making changes.
+Start with a focused issue or scoped change. Follow [CONTRIBUTING.md](CONTRIBUTING.md),
+[AGENTS.md](AGENTS.md), and the [code of conduct](CODE_OF_CONDUCT.md). Report
+vulnerabilities using [SECURITY.md](SECURITY.md), without disclosing sensitive
+details publicly.
 
 ## License
 
-A license has not yet been selected. The workspace currently declares `UNLICENSED`. Choose and add a license before distributing binaries or accepting contributions under an open-source license.
+Licensed under the [Apache License, Version 2.0](LICENSE). Workspace Cargo metadata
+uses the matching `Apache-2.0` identifier. Dependency license review remains a
+separate release-readiness task.

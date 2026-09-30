@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "goal": "Document a parser interface",
+  "work_mode": "mixed",
+  "tasks": [
+    {
+      "id": "T01",
+      "title": "Produce documentation",
+      "description": "Produce a concise documentation artifact. State any missing source evidence.",
+      "kind": "document",
+      "difficulty": "low",
+      "risk": "low",
+      "preferred_provider": "local",
+      "dependencies": [],
+      "required_capabilities": [
+        "documentation"
+      ],
+      "context_requirements": [
+        "Goal and declared dependency artifacts; report missing repository evidence explicitly"
+      ],
+      "expected_outputs": [
+        "T01.md"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": true,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "local-first; capability and context fit",
+      "local_only_data": false
+    }
+  ]
+}

@@ -94,9 +94,10 @@ Work should follow the sequence in `README.md`. Reorder only when dependencies o
 
 ### Gate A — Foundation
 
-- [ ] Workspace, license decision, contribution/security policies, and CI exist.
-- [ ] Edition/MSRV and formatting/linting policy are declared.
-- [ ] First use case and architecture decisions are recorded.
+- [x] Workspace, Apache-2.0 license, contribution/security policies, and CI workflow exist.
+- [x] Edition/MSRV and formatting/linting policy are declared; Rust 1.85.0 is verified locally.
+- [x] First use case and architecture decisions are recorded.
+- [ ] First hosted Linux/Windows CI matrix run passes after the workflow is published.
 
 ### Gate B — Model boundary
 
