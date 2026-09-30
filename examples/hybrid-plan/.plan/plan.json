@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "goal": "Add JWT authentication to the API and protect admin endpoints.",
+  "work_mode": "mixed",
+  "tasks": [
+    {
+      "id": "T01",
+      "title": "Analyze available evidence",
+      "description": "Analyze the request and supplied evidence. Identify relevant interfaces and missing repository context; never claim files were inspected without evidence.",
+      "kind": "explore",
+      "difficulty": "medium",
+      "risk": "high",
+      "preferred_provider": "local",
+      "dependencies": [],
+      "required_capabilities": [
+        "code_analysis"
+      ],
+      "context_requirements": [
+        "Goal and declared dependency artifacts; report missing repository evidence explicitly"
+      ],
+      "expected_outputs": [
+        "T01.md"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": true,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "local-first; capability and context fit",
+      "local_only_data": false
+    },
+    {
+      "id": "T02",
+      "title": "Choose design and constraints",
+      "description": "Use the analysis to resolve design trade-offs and risks. Record assumptions, constraints and validation criteria.",
+      "kind": "reason",
+      "difficulty": "high",
+      "risk": "high",
+      "preferred_provider": "remote",
+      "dependencies": [
+        "T01"
+      ],
+      "required_capabilities": [
+        "advanced_reasoning"
+      ],
+      "context_requirements": [
+        "Goal and declared dependency artifacts; report missing repository evidence explicitly"
+      ],
+      "expected_outputs": [
+        "T02.md"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": true,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "local capability or context gap",
+      "local_only_data": false
+    },
+    {
+      "id": "T03",
+      "title": "Propose implementation",
+      "description": "Produce an implementation proposal or patch artifact using the design and evidence. Do not claim changes were applied.",
+      "kind": "implement",
+      "difficulty": "medium",
+      "risk": "high",
+      "preferred_provider": "local",
+      "dependencies": [
+        "T02"
+      ],
+      "required_capabilities": [
+        "code_generation"
+      ],
+      "context_requirements": [
+        "Goal and declared dependency artifacts; report missing repository evidence explicitly"
+      ],
+      "expected_outputs": [
+        "T03.md"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": true,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "local-first; capability and context fit",
+      "local_only_data": false
+    },
+    {
+      "id": "T04",
+      "title": "Propose validation cases",
+      "description": "Produce tests and expected outcomes for the design. Recommend deterministic checks; do not claim commands were executed.",
+      "kind": "test",
+      "difficulty": "low",
+      "risk": "high",
+      "preferred_provider": "local",
+      "dependencies": [
+        "T02"
+      ],
+      "required_capabilities": [
+        "testing"
+      ],
+      "context_requirements": [
+        "Goal and declared dependency artifacts; report missing repository evidence explicitly"
+      ],
+      "expected_outputs": [
+        "T04.md"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": true,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "local-first; capability and context fit",
+      "local_only_data": false
+    },
+    {
+      "id": "T05",
+      "title": "Review sensitive proposals",
+      "description": "Review implementation and test artifacts against the design. Identify contradictions and unresolved security risks.",
+      "kind": "review",
+      "difficulty": "high",
+      "risk": "high",
+      "preferred_provider": "remote",
+      "dependencies": [
+        "T03",
+        "T04"
+      ],
+      "required_capabilities": [
+        "review"
+      ],
+      "context_requirements": [
+        "Goal and declared dependency artifacts; report missing repository evidence explicitly"
+      ],
+      "expected_outputs": [
+        "T05.md"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": true,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "reasoning quality gain justifies remote use",
+      "local_only_data": false
+    }
+  ]
+}

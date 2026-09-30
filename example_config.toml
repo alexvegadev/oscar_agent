@@ -1,0 +1,40 @@
+# Offline demo. Set provider = "openai_compatible" with --features http for real inference.
+work_mode = "mixed"
+
+[features]
+skills_enabled = false
+mcp_enabled = false
+
+[providers.local]
+enabled = true
+provider = "mock"
+model = "local-demo"
+context_window = 32768
+max_concurrency = 2
+capabilities = ["code_generation", "code_analysis", "refactoring", "documentation", "testing", "summarization", "review"]
+
+[providers.remote]
+enabled = true
+provider = "mock"
+model = "remote-demo"
+context_window = 128000
+max_concurrency = 1
+capabilities = ["code_generation", "code_analysis", "refactoring", "documentation", "testing", "summarization", "advanced_reasoning", "architecture", "review", "planning"]
+
+[routing]
+local_first = true
+max_local_attempts = 2
+remote_review = "auto"
+context_distillation = true
+distilled_bytes_per_artifact = 2048
+
+[limits]
+max_tasks = 32
+max_concurrency = 2
+run_timeout_ms = 300000
+call_timeout_ms = 60000
+max_input_bytes = 24000
+max_output_bytes = 16384
+max_output_tokens = 2048
+max_remote_calls = 8
+max_remote_input_bytes = 96000

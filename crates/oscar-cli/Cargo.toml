@@ -1,0 +1,23 @@
+[package]
+name = "oscar-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "oscar"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.7" }
+oscar-core = { path = "../oscar-core" }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "signal"] }
+
+[features]
+default = []
+http = ["oscar-core/http"]

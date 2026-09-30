@@ -1,2 +1,266 @@
-# oscar_agent
-OSCAR aims to help developers build agents that can reason over a task, create and revise a plan, use explicitly registered tools, keep useful context, and report what they did. The initial goal is a dependable local-first developer assistant; the architecture should leave room for hosted models, MCP integrations, and other agent applications later
+# OSCAR
+
+**OSCAR — Orchestrated System for Context, Actions & Reasoning** — is an experimental AI orchestration runtime written in Rust.
+
+OSCAR aims to help developers build agents that can reason over a task, create and revise a plan, use explicitly registered tools, keep useful context, and report what they did. Its initial goal is a dependable local-first developer assistant with provider-independent model access and bounded, observable execution.
+
+> **Project status:** Hybrid planning and proposal execution are implemented. Workers can use local or remote models, pass artifacts, and report validation and inference usage. Automatic repository exploration, patch application, shell execution, MCP integration, and persistent sessions remain future work.
+
+## Product principles
+
+- **Local first:** use local models whenever they can do useful work; reserve cloud inference for meaningful reasoning gains and escalation.
+- **Explicit capabilities:** select providers by declared capabilities and context limits, not model names.
+- **Inspectable execution:** expose plans, routing decisions, retries, validation results, and terminal outcomes.
+- **Bounded work:** limit concurrency, attempts, elapsed time, input/output size, and remote usage.
+- **Provider independence:** keep orchestration separate from provider-specific HTTP formats.
+- **Controlled actions:** model output cannot authorize tools, register validators, or grant filesystem permissions.
+
+## Quick start
+
+The workspace uses **Rust edition 2024** and declares **MSRV 1.85**. Run these commands from the repository root.
+
+The supplied [example configuration](example_config.toml) uses offline mock providers. No API keys, local model server, or cloud tokens are required:
+
+```bash
+# Generate a plan without inference.
+cargo run -p oscar-cli -- plan "Add JWT authentication and protect admin endpoints" --out auth-plan
+
+# Execute the saved plan with the configured mock workers.
+cargo run -p oscar-cli -- run --plan auth-plan/.plan/plan.json --out auth-run
+```
+
+You can also plan and execute in one command:
+
+```bash
+cargo run -p oscar-cli -- run "Document a parser interface" --out docs-run
+```
+
+Each `--out` directory must be new and have an existing parent. Existing output directories are never overwritten. Mock workers return demonstration artifacts; they do not implement the requested feature.
+
+### Generated files
+
+```text
+OUTPUT_DIRECTORY/
+  PLAN.md              Human-readable plan
+  .plan/
+    plan.json          Canonical, versioned execution plan
+  run.json             Execution outcome, events, calls, usage, and artifacts
+  artifacts/
+    T01.md             Collected worker proposals
+    ...
+```
+
+`plan` writes only the plan files. `run` also writes the report and collected artifacts. `PLAN.md` is rendered from the structured plan, so there is one source of truth.
+
+See the generated [JWT example plan](examples/hybrid-plan/PLAN.md) and its [canonical JSON](examples/hybrid-plan/.plan/plan.json).
+
+## Work modes
+
+Set `work_mode` in your TOML configuration:
+
+```toml
+work_mode = "mixed"
+```
+
+| Mode | Behavior |
+| --- | --- |
+| `local` | All inference stays local. Capability/context limitations and exhausted retries fail explicitly; no remote escalation. |
+| `full_remote` | All inference uses the remote provider; no local inference fallback. |
+| `mixed` | Local-first execution with remote reasoning when quality, capability/context gaps, or failed local attempts justify it. |
+
+The legacy TOML value `remote` is accepted as an alias for `full_remote`. Deterministic planning and validation run on the host in every mode.
+
+Use a different configuration file with `--config`:
+
+```bash
+cargo run -p oscar-cli -- run "Explain this interface: ..." --config oscar.toml --out interface-run
+```
+
+The example local provider does not declare advanced reasoning. Complex local-only requests require a capable local provider; changing the work mode does not bypass capability checks.
+
+### Mixed-mode routing
+
+Ordinary analysis, implementation proposals, tests, and documentation prefer local execution. High-risk reasoning and review may prefer remote inference. Selection also considers required capabilities, context size, prior failures, data restrictions, and configured cost limits.
+
+The default escalation path is:
+
+```text
+Local attempt
+    ↓ validation failure, low confidence, or transient inference failure
+Local retry with feedback
+    ↓ attempts exhausted
+One remote attempt, if permitted by mode, policy, and budgets
+```
+
+Permanent provider failures stop execution. A task's `preferred_provider` can change at runtime; its `local_only_data` boundary cannot. Local-only restrictions propagate through dependent artifacts.
+
+```toml
+[routing]
+local_first = true
+max_local_attempts = 2
+remote_review = "auto"
+context_distillation = true
+distilled_bytes_per_artifact = 2048
+```
+
+Before remote inference, eligible dependency artifacts are reduced to bounded, explicitly marked excerpts. The initial distiller is deterministic excerpting, not semantic summarization.
+
+### Real inference
+
+The optional `http` feature enables an OpenAI-compatible text chat-completions adapter:
+
+```bash
+cargo run -p oscar-cli --features http -- run "Document this interface: ..." --config oscar.toml --out real-run
+```
+
+Configure `provider = "openai_compatible"`, the model, capabilities, context window, and complete `api_url`. Prefer `api_key_env` for credentials. Local endpoints require literal loopback IPs; remote endpoints require HTTPS. Redirects and proxies are disabled.
+
+See [hybrid configuration and execution](docs/hybrid.md) for complete provider examples, resource limits, cost metadata, cancellation semantics, and persistence behavior.
+
+## Architecture
+
+```text
+User request or canonical JSON plan
+                 |
+                 v
+     Request analysis and planning
+                 |
+                 v
+       Validated dependency DAG
+                 |
+                 v
+    Capability-aware routing policy
+          /               \
+         v                 v
+   Local workers      Remote workers
+          \               /
+                 v
+       Bounded artifact store
+                 |
+                 v
+       Validation and feedback
+                 |
+                 v
+    Retry / escalate / terminal report
+```
+
+Independent tasks execute concurrently within bounded Tokio execution waves. Provider-specific concurrency limits apply alongside the global limit. Workers consume declared dependency artifacts instead of repeatedly rediscovering the same information.
+
+The workspace currently has two crates:
+
+| Location | Responsibility |
+| --- | --- |
+| `crates/oscar-core/src/config.rs` | Work modes, provider metadata, routing configuration, and limits. |
+| `crates/oscar-core/src/planning/` | Typed tasks, request heuristics, DAG validation, JSON plans, and Markdown rendering. |
+| `crates/oscar-core/src/routing.rs` | Explainable provider selection, context fit, escalation, and cost checks. |
+| `crates/oscar-core/src/providers/` and `providers.rs` | Provider-neutral async inference, mocks, and the optional HTTP adapter. |
+| `crates/oscar-core/src/context.rs` | Shared artifacts, dependency context, and bounded excerpts. |
+| `crates/oscar-core/src/execution.rs` | Scheduling, cancellation, validation, retries, events, and reports. |
+| `crates/oscar-core/src/error.rs` | Typed orchestration errors. |
+| `crates/oscar-cli` | Clap command registration, configuration loading, output files, and exit codes. |
+
+Keep these responsibilities as modules until independent dependency or API boundaries justify additional crates. See [ADR 0002](docs/adr/0002-hybrid-orchestration.md) for the current decisions; [ADR 0001](docs/adr/0001-initial-workspace-layout.md) records the earlier scaffold.
+
+## Validation and current limitations
+
+Built-in validators check nonempty output, valid JSON, or required text. They do **not** establish that generated code compiles or behaves correctly. Hosts can explicitly register stronger deterministic validators through the Rust API. Unknown validator names fail before inference, and plans cannot register or authorize validators.
+
+High model confidence never overrides failed validation. A passing registered validator can carry more weight than low model confidence.
+
+Current limitations:
+
+- Workers produce proposal artifacts; they do not automatically read repositories, apply patches, or run compiler/test commands.
+- Request classification uses keyword heuristics and can miss important risks.
+- Context distillation uses excerpts and can omit relevant evidence.
+- Provider capabilities and prices are operator-supplied metadata.
+- HTTP behavior is tested with loopback fixtures, not certified against live providers.
+- Cancellation stops client work but cannot guarantee that a remote server stops inference or billing.
+- There is no durable resume, session database, streaming, semantic retrieval, or requests-per-minute scheduler.
+
+Saved plans and artifacts contain user content. `--out` explicitly opts into persistence; delete a saved run's output directory to remove it. The library keeps artifacts in memory without silently persisting them.
+
+## Roadmap
+
+Checked items describe the implemented hybrid proposal slice. Broader agent features remain separate acceptance gates.
+
+### Implemented hybrid slice
+
+- [x] Typed work modes and capability-aware local-first routing.
+- [x] Canonical JSON plans and deterministic human-readable Markdown.
+- [x] Dependency validation and bounded parallel execution waves.
+- [x] Async model boundary, mock providers, and optional HTTP inference.
+- [x] Artifact passing and bounded context excerpts.
+- [x] Validation hooks, local retries, and controlled remote escalation.
+- [x] Cancellation, deadlines, remote budgets, and usage reports.
+- [x] CLI plan/run workflow and deterministic boundary tests.
+
+### Foundation and release policies
+
+- [ ] Complete license, contribution, conduct, and security policies.
+- [ ] Establish CI and verify the declared MSRV on a dedicated toolchain.
+- [ ] Review dependency licensing and public API compatibility.
+
+### Safe repository tools and end-to-end changes
+
+- [ ] Add a registered tool contract with schema validation and permission policy.
+- [ ] Implement bounded read-only repository tools with canonicalized workspace roots.
+- [ ] Attach compiler/test validation through an explicitly authorized execution boundary.
+- [ ] Add reviewed patch application with approval and filesystem safeguards.
+- [ ] Complete model-to-tool-to-model agent flow and adversarial boundary tests.
+- [ ] Keep shell execution disabled until a separate threat review and policy exist.
+
+### Planning and memory
+
+- [ ] Evaluate planner accuracy and routing quality on representative development tasks.
+- [ ] Add observable plan revisions based on execution evidence.
+- [ ] Measure semantic distillation against its extra inference cost.
+- [ ] Define session retention, reset, deletion, and persistence interfaces.
+
+### Integrations and hardening
+
+- [ ] Route MCP capabilities through the common tool validation and permission path.
+- [ ] Add provider conformance tests and optional streaming where useful.
+- [ ] Expand prompt-injection, credential, filesystem, and resource-limit testing.
+- [ ] Add rate scheduling, resumable execution, and telemetry only with explicit bounds and privacy controls.
+
+### Release readiness
+
+- [ ] Review public APIs, examples, compatibility policy, and security documentation.
+- [ ] Verify clean installation and real-provider quick starts.
+- [ ] Publish release notes distinguishing stable and experimental behavior.
+
+See [AGENTS.md](AGENTS.md) for project invariants, acceptance gates, and the definition of done.
+
+## Development
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo test --workspace
+```
+
+Tests use deterministic mocks and, with HTTP enabled, loopback fixtures. They do not require real API credentials or model downloads. The existing prototype command remains available:
+
+```bash
+cargo run -p oscar-cli -- test --name example
+```
+
+That command is a CLI scaffold; use `cargo test` to run the Rust test suite.
+
+## Documentation
+
+- [Hybrid configuration, behavior, and limitations](docs/hybrid.md)
+- [Architecture decision: hybrid orchestration](docs/adr/0002-hybrid-orchestration.md)
+- [Implementation plan](docs/hybrid-implementation-plan.md)
+- [Delivery record and verification results](docs/hybrid-delivery.md)
+- [Generated example plan](examples/hybrid-plan/PLAN.md)
+- [Contributor and agent working agreements](AGENTS.md)
+
+## Contributing
+
+Start with a focused issue or scoped change. Inspect existing code and tests, preserve capability boundaries, and add meaningful failure/limit tests. Document user-visible behavior and distinguish implemented features from roadmap goals. Read [AGENTS.md](AGENTS.md) before making changes.
+
+## License
+
+A license has not yet been selected. The workspace currently declares `UNLICENSED`. Choose and add a license before distributing binaries or accepting contributions under an open-source license.
