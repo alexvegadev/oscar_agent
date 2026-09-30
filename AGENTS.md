@@ -107,10 +107,14 @@ Work should follow the sequence in `README.md`. Reorder only when dependencies o
 
 ### Gate C — Tool boundary
 
-- [ ] Registry validates unique names and inputs.
-- [ ] Policies deny unauthorized tools before execution.
-- [ ] Output and runtime limits are enforced.
+- [x] Registry validates unique names and inputs (bounded flat-object schema).
+- [x] Policies deny unauthorized tools before execution; side effects require host approval.
+- [x] Tool session call/output limits, deadlines, and cancellation are enforced.
 - [ ] Read-only starter tool(s) are constrained to explicit roots.
+
+Implement this boundary before the remaining release-oriented dependency/API audit
+because repository tools and the agent loop depend on it. No model-to-tool or CLI
+integration is implied by the library registry. The release audit remains required.
 
 ### Gate D — End-to-end agent
 

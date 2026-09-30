@@ -157,6 +157,7 @@ The workspace currently has two crates:
 | `crates/oscar-core/src/context.rs` | Shared artifacts, dependency context, and bounded excerpts. |
 | `crates/oscar-core/src/execution.rs` | Scheduling, cancellation, validation, retries, events, and reports. |
 | `crates/oscar-core/src/error.rs` | Typed orchestration errors. |
+| `crates/oscar-core/src/tools/` | Host-registered tool contract, bounded argument schemas, permissions, approvals, and tool sessions. |
 | `crates/oscar-cli` | Clap command registration, configuration loading, output files, and exit codes. |
 
 Keep these responsibilities as modules until independent dependency or API boundaries justify additional crates. See [ADR 0002](docs/adr/0002-hybrid-orchestration.md) for the current decisions; [ADR 0001](docs/adr/0001-initial-workspace-layout.md) records the earlier scaffold.
@@ -183,6 +184,10 @@ Saved plans and artifacts contain user content. `--out` explicitly opts into per
 
 Checked items describe the implemented hybrid proposal slice. Broader agent features remain separate acceptance gates.
 
+Current implementation priority is the tool boundary, which unlocks safe repository
+access and the later agent loop. The dependency/API release audit remains open and
+must finish before release; it does not block this incremental boundary work.
+
 ### Implemented hybrid slice
 
 - [x] Typed work modes and capability-aware local-first routing.
@@ -198,17 +203,23 @@ Checked items describe the implemented hybrid proposal slice. Broader agent feat
 
 - [x] Align Apache-2.0 license metadata and add contribution, conduct, and security policies.
 - [x] Add Linux/Windows CI for stable and Rust 1.85.0; verify the MSRV locally.
-- [ ] Confirm the first hosted CI matrix run after publishing the workflow.
+- [x] Confirm the first hosted CI matrix run after publishing the workflow.
 - [ ] Review dependency licensing and public API compatibility.
 
 ### Safe repository tools and end-to-end changes
 
-- [ ] Add a registered tool contract with schema validation and permission policy.
+- [x] Add a registered tool contract with schema validation and permission policy.
+- [x] Enforce tool call/output limits, cancellation/deadlines, duplicate-call rejection,
+  and explicit host approval for side effects.
 - [ ] Implement bounded read-only repository tools with canonicalized workspace roots.
 - [ ] Attach compiler/test validation through an explicitly authorized execution boundary.
 - [ ] Add reviewed patch application with approval and filesystem safeguards.
 - [ ] Complete model-to-tool-to-model agent flow and adversarial boundary tests.
 - [ ] Keep shell execution disabled until a separate threat review and policy exist.
+
+The registry is an experimental library API; the CLI's proposal workers still do
+not invoke tools. See [tool boundary documentation](docs/tools.md). Run its
+credential-free example with `cargo run -p oscar-core --example tool_registry`.
 
 ### Planning and memory
 

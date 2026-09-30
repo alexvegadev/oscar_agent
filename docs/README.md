@@ -16,3 +16,8 @@ and [ADR 0002](adr/0002-hybrid-orchestration.md).
 See [contributing](../CONTRIBUTING.md), [community conduct](../CODE_OF_CONDUCT.md),
 [security reporting](../SECURITY.md), and [ADR 0003](adr/0003-foundation-and-msrv.md)
 for CI, toolchain compatibility, and license metadata decisions.
+
+## Tool boundary
+
+See [registered tool sessions](tools.md) and [ADR 0004](adr/0004-registered-tool-boundary.md)
+for the experimental library API, permissions, limits, and remaining integration work.
