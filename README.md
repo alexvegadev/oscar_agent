@@ -217,6 +217,32 @@ Checked items describe the implemented hybrid proposal slice. Broader agent feat
 - [ ] Measure semantic distillation against its extra inference cost.
 - [ ] Define session retention, reset, deletion, and persistence interfaces.
 
+### Optional inference-based answer classification (proposed)
+
+Use a local or remote worker to generate an answer, then classify that answer
+with Laya, JEV, or another compatible decision model. OSCAR uses the typed result
+to select an allowed next step: accept, retry, gather context, escalate, or request
+review. This is a possible future feature, not implemented configuration.
+
+```text
+OSCAR plan → local/remote worker inference → generated answer + evidence
+           → Laya / JEV / classifier → typed decision
+           → OSCAR policy and validation → next execution step
+```
+
+- [ ] Add an opt-in TOML classification stage, disabled by default, with provider,
+  endpoint/model, decision schema, thresholds, timeouts, and call budgets.
+- [ ] Implement a provider-neutral classification contract and a local Laya adapter
+  following its state/typed-question usage guidance; support remote JEV and other
+  classifiers through adapters and shared conformance tests.
+- [ ] Combine classification with deterministic validation, preserve strict work
+  modes and local-only data, and handle uncertain/invalid responses explicitly.
+- [ ] Evaluate domain/language accuracy and calibration, and record classifier
+  decisions, latency, usage, and resulting plan transitions.
+
+See the [answer-classification proposal](docs/decision-classification.md) for the
+proposed TOML, Laya usage requirements, compatibility boundaries, and acceptance tests.
+
 ### Integrations and hardening
 
 - [ ] Route MCP capabilities through the common tool validation and permission path.

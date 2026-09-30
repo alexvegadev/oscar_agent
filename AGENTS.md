@@ -127,6 +127,10 @@ Work should follow the sequence in `README.md`. Reorder only when dependencies o
 
 - [ ] Planner is optional and replaceable.
 - [ ] Plan revisions and run state are observable.
+- [ ] Optional answer-classification stage supports local Laya and remote JEV/other
+  adapters through a typed contract, explicit TOML opt-in, evaluated thresholds,
+  and bounded calls. Classifications cannot override validation, work modes,
+  local-only data, permissions, or approval policy. See docs/decision-classification.md.
 - [ ] Session retention/reset/delete behavior is explicit and tested.
 - [ ] Persistence backends are selected only after interface and threat review.
 
