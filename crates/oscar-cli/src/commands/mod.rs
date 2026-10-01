@@ -1,4 +1,7 @@
+mod agent;
 mod orchestration;
+mod repository;
+mod terminal;
 mod test;
 
 use clap::{ArgMatches, Command};
@@ -14,6 +17,11 @@ struct CommandSpec {
 }
 
 const COMMANDS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "agent",
+        build: agent::command,
+        handle: agent::handle,
+    },
     CommandSpec {
         name: test::NAME,
         build: test::command,

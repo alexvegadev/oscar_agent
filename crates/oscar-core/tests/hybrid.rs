@@ -17,7 +17,7 @@ use std::{
 };
 
 fn config() -> Config {
-    Config::parse(include_str!("../../../example_config.toml")).unwrap()
+    Config::parse(include_str!("../../../settings.toml")).unwrap()
 }
 fn single(c: &Config) -> Plan {
     plan_request("Write README documentation", c).unwrap()
@@ -111,7 +111,7 @@ fn risk_reasoning_and_cost_are_distinct_from_implementation() {
 }
 #[test]
 fn valid_config_legacy_alias_and_redaction() {
-    let original = include_str!("../../../example_config.toml");
+    let original = include_str!("../../../settings.toml");
     assert_eq!(
         Config::parse(&original.replace("work_mode = \"mixed\"", "work_mode = \"remote\""))
             .unwrap()
@@ -125,7 +125,10 @@ fn valid_config_legacy_alias_and_redaction() {
         original.replace("mixed", "invalid"),
         original.replace("max_local_attempts = 2", "max_local_attempts = 0"),
         original.replace("max_concurrency = 2", "max_concurrency = 0"),
-        original.replace("context_window = 32768", "context_window = 10"),
+        original.replace(
+            &format!("context_window = {}", c.providers["local"].context_window),
+            "context_window = 10",
+        ),
         original.replace("local_first = true", "local_frist = true"),
     ] {
         assert!(Config::parse(&bad).is_err());

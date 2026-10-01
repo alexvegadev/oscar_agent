@@ -110,7 +110,7 @@ Work should follow the sequence in `README.md`. Reorder only when dependencies o
 - [x] Registry validates unique names and inputs (bounded flat-object schema).
 - [x] Policies deny unauthorized tools before execution; side effects require host approval.
 - [x] Tool session call/output limits, deadlines, and cancellation are enforced.
-- [ ] Read-only starter tool(s) are constrained to explicit roots.
+- [x] Agent CLI read-only starter tool is constrained to an explicit workspace root.
 
 Implement this boundary before the remaining release-oriented dependency/API audit
 because repository tools and the agent loop depend on it. No model-to-tool or CLI
@@ -118,6 +118,9 @@ integration is implied by the library registry. The release audit remains requir
 
 ### Gate D — End-to-end agent
 
+- [x] Interactive CLI proposal session supports explicit workspace file reads,
+  follow-up context, bounded inference and reset without resetting budgets.
+  Model-initiated tools, applying edits and the autonomous loop remain separate.
 - [ ] Bounded run loop supports model → tool → model flow.
 - [ ] Events and terminal outcomes are inspectable.
 - [ ] CLI can complete a mock-backed flow without credentials.

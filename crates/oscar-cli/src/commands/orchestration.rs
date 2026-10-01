@@ -98,7 +98,7 @@ fn common(name: &'static str) -> Command {
         .arg(
             Arg::new("config")
                 .long("config")
-                .default_value("example_config.toml"),
+                .default_value("settings.toml"),
         )
         .arg(
             Arg::new("out")

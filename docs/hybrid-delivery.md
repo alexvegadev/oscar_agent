@@ -69,7 +69,7 @@ CallRecord, RunReport, Outcome and OscarError.
 - `crates/oscar-cli/src/error.rs`
 - `crates/oscar-cli/src/commands/mod.rs`
 - `Cargo.lock`
-- `example_config.toml`
+- `../settings.toml`
 - `README.md`
 - `AGENTS.md`
 - `docs/README.md`

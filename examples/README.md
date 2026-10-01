@@ -4,7 +4,7 @@ Add runnable, credential-free examples here as features become implemented. Exam
 
 ## Hybrid example
 
-The root `example_config.toml` is a credential-free mixed-mode mock configuration.
+The root `../settings.toml` is a credential-free mixed-mode mock configuration.
 Run `cargo run -p oscar-cli -- run "Add JWT authentication" --out demo-run` from
 the repository root with a new output directory. See `docs/hybrid.md` for real
 local/remote configuration and limitations.

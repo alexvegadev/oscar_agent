@@ -19,7 +19,7 @@ fn output_dir() -> PathBuf {
 #[test]
 fn cli_runs_offline_and_refuses_to_overwrite_artifacts() {
     let dir = output_dir();
-    let config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../example_config.toml");
+    let config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../settings.toml");
     let args = [
         "run",
         "Add JWT authentication and protect admin endpoints",
@@ -83,7 +83,7 @@ fn cli_runs_offline_and_refuses_to_overwrite_artifacts() {
 fn cli_plan_reloads_canonical_json_and_test_needs_no_config() {
     let first = output_dir();
     let second = output_dir();
-    let config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../example_config.toml");
+    let config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../settings.toml");
     let result = Command::new(env!("CARGO_BIN_EXE_oscar"))
         .args([
             "plan",
@@ -131,7 +131,7 @@ fn inference_failure_is_reported_without_a_saved_plan_and_can_be_overridden() {
     let config = parent.join("config.toml");
     fs::write(
         &config,
-        include_str!("../../../example_config.toml")
+        include_str!("../../../settings.toml")
             .replace("mode = \"heuristic\"", "mode = \"inference\""),
     )
     .unwrap();

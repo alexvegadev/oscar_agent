@@ -159,7 +159,7 @@ mod tests {
     use std::io::{Read, Write};
 
     fn provider(url: &str) -> Provider {
-        let c = Config::parse(include_str!("../../../../example_config.toml")).unwrap();
+        let c = Config::parse(include_str!("../../../../settings.toml")).unwrap();
         let mut p = c.providers["local"].clone();
         p.api_url = Some(url.into());
         p

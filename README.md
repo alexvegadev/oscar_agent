@@ -6,6 +6,11 @@ OSCAR aims to help developers build agents that can reason over a task, create a
 
 > **Project status:** Hybrid planning and proposal execution are implemented. Workers can use local or remote models, pass artifacts, and report validation and inference usage. Automatic repository exploration, patch application, shell execution, MCP integration, and persistent sessions remain future work.
 
+Interactive coding proposals are available with `cargo run -p oscar-cli -- agent
+--workspace .`. Use `/read PATH` to load source files, then ask for edits and
+follow up in the same conversation. The example configuration uses mock replies.
+See [agent mode](docs/agent-mode.md) for real-provider setup, commands and limits.
+
 ## Product principles
 
 - **Local first:** use local models whenever they can do useful work; reserve cloud inference for meaningful reasoning gains and escalation.
@@ -19,7 +24,7 @@ OSCAR aims to help developers build agents that can reason over a task, create a
 
 The workspace uses **Rust edition 2024** and declares **MSRV 1.85**. Run these commands from the repository root.
 
-The supplied [example configuration](example_config.toml) uses offline mock providers. No API keys, local model server, or cloud tokens are required:
+The supplied [example configuration](settings.toml) uses offline mock providers. No API keys, local model server, or cloud tokens are required:
 
 ```bash
 # Generate a plan without inference.
@@ -254,14 +259,18 @@ must finish before release; it does not block this incremental boundary work.
 - [x] Add a registered tool contract with schema validation and permission policy.
 - [x] Enforce tool call/output limits, cancellation/deadlines, duplicate-call rejection,
   and explicit host approval for side effects.
-- [ ] Implement bounded read-only repository tools with canonicalized workspace roots.
+- [x] Add a bounded read-only file tool for agent CLI sessions with an explicit,
+  canonicalized workspace root and capability-relative opens.
+- [x] Add interactive `agent` sessions with explicit workspace file reads,
+  follow-up context, edit proposals and shared session budgets.
 - [ ] Attach compiler/test validation through an explicitly authorized execution boundary.
-- [ ] Add reviewed patch application with approval and filesystem safeguards.
+- [ ] Add a reviewed patch application with approval and filesystem safeguards.
 - [ ] Complete model-to-tool-to-model agent flow and adversarial boundary tests.
 - [ ] Keep shell execution disabled until a separate threat review and policy exist.
 
-The registry is an experimental library API; the CLI's proposal workers still do
-not invoke tools. See [tool boundary documentation](docs/tools.md). Run its
+The registry is an experimental library API; plan/run proposal workers do not
+invoke tools. Agent mode admits user-requested file reads through the registry.
+See [tool boundary documentation](docs/tools.md). Run its
 credential-free example with `cargo run -p oscar-core --example tool_registry`.
 
 ### Planning and memory

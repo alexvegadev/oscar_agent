@@ -1,3 +1,4 @@
+
 # Offline demo. Set provider = "openai_compatible" with --features http for real inference.
 work_mode = "mixed"
 
@@ -13,7 +14,7 @@ mcp_enabled = false
 enabled = true
 provider = "mock"
 model = "local-demo"
-context_window = 32768
+context_window = 132000
 max_concurrency = 2
 capabilities = ["code_generation", "code_analysis", "refactoring", "documentation", "testing", "summarization", "review"]
 

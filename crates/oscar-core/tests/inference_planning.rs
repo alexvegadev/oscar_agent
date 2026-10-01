@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
 fn config() -> Config {
-    let mut c = Config::parse(include_str!("../../../example_config.toml")).unwrap();
+    let mut c = Config::parse(include_str!("../../../settings.toml")).unwrap();
     c.providers
         .get_mut("local")
         .unwrap()
