@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "goal": "Document this interface: ...",
+  "work_mode": "local",
+  "tasks": [
+    {
+      "id": "T01",
+      "title": "Analyze interface definition",
+      "description": "Inspect the provided interface definition to identify methods, parameters, return types, and behaviors. MISSING EVIDENCE: The interface definition is not provided in the input (placeholder '...' used). Uncertainty: Analysis cannot be completed without the source code or specification. Acceptance criteria: Identification of all components and constraints.",
+      "kind": "explore",
+      "difficulty": "medium",
+      "risk": "low",
+      "preferred_provider": "local",
+      "dependencies": [],
+      "required_capabilities": [
+        "code_analysis"
+      ],
+      "context_requirements": [
+        "User-supplied interface definition"
+      ],
+      "expected_outputs": [
+        "Interface analysis report"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": false,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "strict local mode",
+      "local_only_data": true
+    },
+    {
+      "id": "T02",
+      "title": "Define documentation requirements",
+      "description": "Determine the target audience and the required documentation format (e.g., Markdown, JSDoc, OpenAPI, or Swagger). Acceptance criteria: Selection of format, scope, and style guide.",
+      "kind": "reason",
+      "difficulty": "low",
+      "risk": "low",
+      "preferred_provider": "local",
+      "dependencies": [
+        "T01"
+      ],
+      "required_capabilities": [
+        "planning"
+      ],
+      "context_requirements": [
+        "Interface analysis report"
+      ],
+      "expected_outputs": [
+        "Documentation requirements specification"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": false,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "strict local mode",
+      "local_only_data": true
+    },
+    {
+      "id": "T03",
+      "title": "Draft documentation",
+      "description": "Generate the documentation content based on the analysis and requirements. Acceptance criteria: Complete documentation for all interface components, including examples and error cases.",
+      "kind": "implement",
+      "difficulty": "medium",
+      "risk": "low",
+      "preferred_provider": "local",
+      "dependencies": [
+        "T01",
+        "T02"
+      ],
+      "required_capabilities": [
+        "documentation",
+        "code_generation"
+      ],
+      "context_requirements": [
+        "Interface analysis report",
+        "Documentation requirements specification"
+      ],
+      "expected_outputs": [
+        "Draft documentation"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": false,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "strict local mode",
+      "local_only_data": true
+    },
+    {
+      "id": "T04",
+      "title": "Review documentation",
+      "description": "Review the drafted documentation for accuracy, clarity, and completeness. Acceptance criteria: Finalized documentation ready for use.",
+      "kind": "review",
+      "difficulty": "low",
+      "risk": "low",
+      "preferred_provider": "local",
+      "dependencies": [
+        "T03"
+      ],
+      "required_capabilities": [
+        "review"
+      ],
+      "context_requirements": [
+        "Draft documentation"
+      ],
+      "expected_outputs": [
+        "Final documentation"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": false,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "strict local mode",
+      "local_only_data": true
+    }
+  ]
+}

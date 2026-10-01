@@ -26,15 +26,20 @@ max_concurrency = 1
 capabilities = ["code_generation", "code_analysis", "refactoring", "documentation", "testing", "summarization", "advanced_reasoning", "architecture", "review", "planning"]
 
 # Proposed classifier settings; not implemented (see docs/decision-classification.md).
-# [decision_engine.local]
-# enabled = true
-# api = "http://localhost:8082/v1"
-# api_key = "none"
-#
-# [decision_engine.remote]
-# enabled = false
-# provider = "jev"
-# api_key = ""
+#[classification]
+#enabled = true
+#provider = "jev"
+#execution = "remote"
+#api_url = "https://api.typesafe.ai/v1/systemone"
+#model = "jev-latest"
+#api_key_env = "OSCAR_CLASSIFIER_API_KEY"
+#decision_schema = "task_outcome_v1"
+#on_uncertain = "request_review"
+#on_error = "fail_task"
+#timeout_ms = 5000
+#max_calls_per_run = 16
+#max_input_bytes = 12000
+#max_output_bytes = 4096
 
 
 [routing]

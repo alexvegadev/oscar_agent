@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "run_id": "18228-1790824590401250600-0",
+  "outcome": "completed",
+  "error": null,
+  "events": [
+    {
+      "kind": "started"
+    },
+    {
+      "kind": "routed",
+      "task": "T01",
+      "provider": "local",
+      "attempt": 1,
+      "reason": "strict local mode"
+    },
+    {
+      "kind": "validation",
+      "task": "T01",
+      "passed": true,
+      "strong": false
+    },
+    {
+      "kind": "routed",
+      "task": "T02",
+      "provider": "local",
+      "attempt": 1,
+      "reason": "strict local mode"
+    },
+    {
+      "kind": "validation",
+      "task": "T02",
+      "passed": true,
+      "strong": false
+    },
+    {
+      "kind": "routed",
+      "task": "T03",
+      "provider": "local",
+      "attempt": 1,
+      "reason": "strict local mode"
+    },
+    {
+      "kind": "validation",
+      "task": "T03",
+      "passed": true,
+      "strong": false
+    },
+    {
+      "kind": "routed",
+      "task": "T04",
+      "provider": "local",
+      "attempt": 1,
+      "reason": "strict local mode"
+    },
+    {
+      "kind": "validation",
+      "task": "T04",
+      "passed": true,
+      "strong": false
+    },
+    {
+      "kind": "finished",
+      "outcome": "completed"
+    }
+  ],
+  "calls": [
+    {
+      "task": "T01",
+      "provider": "local",
+      "attempt": 1,
+      "input_bytes": 723,
+      "usage": {
+        "input": 193,
+        "output": 919
+      },
+      "simulation": false,
+      "status": "returned"
+    },
+    {
+      "task": "T02",
+      "provider": "local",
+      "attempt": 1,
+      "input_bytes": 2905,
+      "usage": {
+        "input": 700,
+        "output": 1587
+      },
+      "simulation": false,
+      "status": "returned"
+    },
+    {
+      "task": "T03",
+      "provider": "local",
+      "attempt": 1,
+      "input_bytes": 7137,
+      "usage": {
+        "input": 1596,
+        "output": 1587
+      },
+      "simulation": false,
+      "status": "returned"
+    },
+    {
+      "task": "T04",
+      "provider": "local",
+      "attempt": 1,
+      "input_bytes": 4736,
+      "usage": {
+        "input": 1108,
+        "output": 1332
+      },
+      "simulation": false,
+      "status": "returned"
+    }
+  ],
+  "artifacts": {
+    "T01": {
+      "task_id": "T01",
+      "content": "# Interface Analysis Report (Draft)\n\n## Status: Incomplete\n**Uncertainty Level:** High\n**Missing Evidence:** The interface definition (source code, specification, or schema) was not provided in the input.\n\n---\n\n## 1. Overview\nThe objective of this report is to document and analyze the provided interface to identify its methods, parameters, return types, and behaviors. Because the source material is currently missing, no specific analysis can be performed at this time.\n\n## 2. Missing Information\nTo complete this proposal artifact, the following evidence is required:\n*   **Interface Definition:** The raw code (e.g., Java Interface, TypeScript Type, C# Contract), API specification (e.g., OpenAPI/Swagger, GraphQL Schema), or communication protocol (e.g., Protobuf, Thrift).\n*   **Contextual Documentation:** Any existing documentation regarding the intended use cases or business logic associated with the interface.\n\n## 3. Proposed Analysis Framework\nOnce the evidence is provided, the analysis will be structured as follows:\n\n### 3.1 Method Inventory\nFor every method identified in the interface, the report will document:\n*   **Method Name:** The unique identifier for the operation.\n*   **Parameters:** \n    *   Name and Type.\n    *   Nullability/Optionality.\n    *   Validation constraints (e.g., regex, range, length).\n*   **Return Types:** The data structure or primitive returned upon success.\n*   **Exceptions/Errors:** Expected error codes or exception types.\n\n### 3.2 Behavioral Analysis\n*   **Side Effects:** Identification of state changes (e.g., database writes, cache invalidation).\n*   **Concurrency:** Analysis of thread safety or asynchronous behavior.\n*   **Dependencies:** Identification of external services or internal modules invoked by the interface.\n\n### 3.3 Constraints & Security\n*   **Rate Limiting:** Any specified limits on usage.\n*   **Authentication/Authorization:** Required scopes or credentials.\n*   **Data Integrity:** Validation logic for incoming payloads.\n\n## 4. Next Steps\nPlease provide the interface definition to initiate the formal analysis. Once provided, the \"Missing Evidence\" section will be updated, and the \"Method Inventory\" will be populated with specific data.",
+      "provider": "local",
+      "confidence": "medium",
+      "validation": "artifact format only; code not executed",
+      "local_only_data": true
+    },
+    "T02": {
+      "task_id": "T02",
+      "content": "# Documentation Requirements Specification (Proposal)\n\n**Status:** Draft / Proposal  \n**Uncertainty Level:** High  \n**Missing Evidence:** The source interface definition (e.g., source code, API specification, or schema) has not been provided. Analysis cannot proceed until the target interface is submitted.\n\n---\n\n## 1. Objective\nThe purpose of this document is to define the requirements, scope, and standards for the documentation of the target interface. This specification ensures that once the interface is provided, the resulting documentation is consistent, accessible, and actionable for all stakeholders.\n\n## 2. Target Audience\nThe documentation will be structured to serve the following primary audiences:\n\n*   **Software Engineers (Internal/External):** Require precise technical specifications, request/response schemas, error codes, and code snippets for integration.\n*   **QA/Testing Teams:** Require clear definitions of expected behaviors, edge cases, and validation constraints to build automated test suites.\n*   **Product Managers:** Require high-level overviews of capabilities, business logic flows, and limitations.\n*   **Security Auditors:** Require information on authentication mechanisms, authorization scopes, and data encryption standards.\n\n## 3. Documentation Format Selection\nBased on standard industry practices, the following formats are proposed for the final output:\n\n| Format | Use Case | Justification |\n| :--- | :--- | :--- |\n| **OpenAPI / Swagger** | RESTful API Specifications | Industry standard for interactive documentation, automated client generation, and testing. |\n| **Markdown** | Integration Guides & Tutorials | Human-readable format for high-level overviews, \"Getting Started\" guides, and complex workflow descriptions. |\n| **JSDoc / Docstrings** | Code-level Documentation | Inline documentation for internal methods to ensure maintainability by the development team. |\n| **Protobuf / Thrift** | RPC / gRPC Services | (If applicable) Required for strictly typed, high-performance communication protocols. |\n\n## 4. Scope of Documentation\nThe documentation will cover the following areas:\n\n*   **Authentication & Authorization:** Detailed requirements for API keys, OAuth2 scopes, or JWT headers.\n*   **Endpoint/Method Inventory:** Comprehensive list of all available operations.\n*   **Request/Response Schema:** \n    *   Data types (String, Integer, Boolean, etc.).\n    *   Required vs. Optional fields.\n    *   Regex patterns and range constraints.\n*   **Error Handling:** A standardized table of HTTP status codes and internal application error codes with descriptive messages.\n*   **Rate Limiting & Quotas:** Clear definitions of request limits and throttling policies.\n*   **Example Payloads:** Representative JSON/XML samples for both \"Happy Path\" and \"Error\" scenarios.\n\n## 5. Style Guide & Consistency\nTo ensure professional quality, the following style rules will be applied:\n\n*   **Naming Conventions:** Consistent use of `camelCase` or `snake_case` as dictated by the source interface.\n*   **Tone:** Technical, objective, and concise.\n*   **Structure:** Standardized headers (e.g., Overview, Parameters, Examples, Errors).\n*   **Versioning:** Clear indication of the documentation version relative to the API version.\n\n## 6. Acceptance Criteria\nThe documentation will be considered complete when:\n1.  **Format Alignment:** The output matches the selected format (e.g., a valid `.yaml` file for OpenAPI).\n2.  **Completeness:** Every method/endpoint identified in the source interface is documented.\n3.  **Validation:** All required fields in the schema are marked as such.\n4.  **Example Accuracy:** Provided code snippets can be successfully executed against a test environment.\n5.  **Review:** The documentation passes a peer review for clarity and technical accuracy.\n\n## 7. Next Steps\n**Action Required:** Provide the source interface definition (Code, OpenAPI spec, or Schema). \nUpon receipt of the evidence, this proposal will be converted into a formal **Interface Analysis Report**.",
+      "provider": "local",
+      "confidence": "medium",
+      "validation": "artifact format only; code not executed",
+      "local_only_data": true
+    },
+    "T03": {
+      "task_id": "T03",
+      "content": "# Development Proposal: Interface Documentation Project\n\n**Status:** Pending Evidence  \n**Uncertainty Level:** High  \n**Missing Evidence:** The source interface definition (e.g., source code, API specification, schema, or communication protocol) has not been provided. Analysis and documentation generation cannot proceed until this evidence is submitted.\n\n---\n\n## 1. Interface Analysis Report (Proposal)\n\nThe objective of this report is to provide a structured analysis of the target interface to ensure all functional and non-functional requirements are captured. \n\n### 1.1 Analysis Methodology\nOnce the interface definition is provided, the following analysis will be performed:\n\n*   **Method Inventory:**\n    *   **Identifier:** Unique name for each operation.\n    *   **Parameters:** Identification of types, nullability, and validation constraints (e.g., regex, range).\n    *   **Return Types:** Data structures or primitives returned upon success.\n    *   **Error States:** Mapping of expected exceptions and error codes.\n*   **Behavioral Analysis:**\n    *   **Side Effects:** Identification of state changes (e.g., database writes, cache invalidation).\n    *   **Concurrency:** Assessment of thread safety and asynchronous behavior.\n    *   **Dependencies:** Identification of external services or internal modules invoked.\n*   **Constraints & Security:**\n    *   **Rate Limiting:** Identification of usage limits.\n    *   **AuthN/AuthZ:** Required scopes, credentials, or headers.\n    *   **Data Integrity:** Validation logic for incoming payloads.\n\n---\n\n## 2. Documentation Requirements Specification\n\nThis specification defines the standards and scope for the final documentation artifacts to ensure they are actionable for all stakeholders.\n\n### 2.1 Target Audiences\n*   **Software Engineers:** Technical specifications, request/response schemas, and code snippets.\n*   **QA/Testing Teams:** Expected behaviors, edge cases, and validation constraints.\n*   **Product Managers:** High-level overviews, business logic flows, and limitations.\n*   **Security Auditors:** Authentication mechanisms, authorization scopes, and encryption standards.\n\n### 2.2 Proposed Documentation Formats\n| Format | Use Case | Justification |\n| :--- | :--- | :--- |\n| **OpenAPI / Swagger** | RESTful API Specs | Industry standard for interactive docs and client generation. |\n| **Markdown** | Integration Guides | Human-readable format for \"Getting Started\" and workflows. |\n| **JSDoc / Docstrings** | Code-level Docs | Inline documentation for maintainability. |\n| **Protobuf / Thrift** | RPC / gRPC | Required for strictly typed, high-performance protocols. |\n\n### 2.3 Scope of Documentation\nThe final documentation will include:\n1.  **Authentication & Authorization:** Detailed requirements for API keys, OAuth2, or JWT.\n2.  **Endpoint/Method Inventory:** Comprehensive list of all available operations.\n3.  **Request/Response Schema:** Data types, required vs. optional fields, and regex patterns.\n4.  **Error Handling:** Standardized table of HTTP status codes and internal error messages.\n5.  **Rate Limiting & Quotas:** Clear definitions of throttling policies.\n6.  **Example Payloads:** Representative JSON/XML samples for \"Happy Path\" and \"Error\" scenarios.\n\n### 2.4 Acceptance Criteria\nThe documentation will be considered complete when:\n1.  **Format Alignment:** Output matches the selected format (e.g., valid `.yaml` for OpenAPI).\n2.  **Completeness:** Every method/endpoint in the source interface is documented.\n3.  **Validation:** All required fields in the schema are explicitly marked.\n4.  **Example Accuracy:** Provided snippets are technically accurate for the target environment.\n5.  **Review:** The documentation passes a peer review for clarity and technical accuracy.\n\n---\n\n## 3. Next Steps\n**Action Required:** Please provide the source interface definition (Code, OpenAPI spec, or Schema). \n\nUpon receipt of the evidence, the \"Missing Evidence\" section will be updated, and the \"Method Inventory\" and \"Documentation Content\" will be populated based on the provided data.",
+      "provider": "local",
+      "confidence": "medium",
+      "validation": "artifact format only; code not executed",
+      "local_only_data": true
+    },
+    "T04": {
+      "task_id": "T04",
+      "content": "### Review of Development Proposal: Interface Documentation Project\n\n**Status:** Review Complete  \n**Reviewer Note:** This review evaluates the *proposal* for the documentation project. Because the source interface definition has not been provided, the actual documentation content cannot be reviewed for technical accuracy. The following review focuses on the methodology, scope, and structural integrity of the proposed documentation plan.\n\n---\n\n#### 1. Assessment of Proposal Quality\n\n**Accuracy of Methodology:**\n*   **Strengths:** The \"Method Inventory\" and \"Behavioral Analysis\" sections are technically sound. They correctly identify the critical dimensions of interface documentation, specifically highlighting side effects, concurrency, and authN/authZ.\n*   **Improvements:** Consider adding a \"Versioning Strategy\" to the methodology. It is important to define how documentation will be versioned in sync with the API/Interface changes (e.g., Semantic Versioning).\n\n**Clarity of Requirements:**\n*   **Strengths:** The \"Target Audiences\" section clearly distinguishes between the needs of Engineers, QA, Product Managers, and Security Auditors. This ensures the final output will be multi-purpose.\n*   **Improvements:** The \"Documentation Formats\" table is clear, but it would benefit from a \"Primary Format\" designation to indicate which format serves as the \"Source of Truth\" (e.g., OpenAPI as the source, Markdown as the derivative).\n\n**Completeness of Scope:**\n*   **Strengths:** The inclusion of \"Example Payloads\" for both \"Happy Path\" and \"Error\" scenarios is a high-value requirement for QA and Integration teams.\n*   **Missing Elements:** \n    *   **Maintenance Plan:** The proposal lacks a plan for how documentation will be updated as the interface evolves (e.g., CI/CD integration for doc generation).\n    *   **Glossary:** For complex interfaces, a standardized glossary of domain-specific terms is often required to ensure consistency across different teams.\n\n---\n\n#### 2. Missing Evidence & Uncertainty\n\n**Critical Missing Evidence:**\n*   **Source Interface Definition:** The project is currently stalled at the \"Pending Evidence\" stage. No source code, OpenAPI spec, Protobuf file, or schema has been provided.\n\n**Uncertainty Level:** **High**\n*   Until the source interface is provided, the complexity of the documentation (e.g., number of endpoints, depth of nested objects, complexity of auth logic) cannot be estimated.\n\n---\n\n#### 3. Final Recommendation\n\nThe proposal is **Approved for Execution** pending the submission of the source interface. \n\n**Next Actions for Stakeholders:**\n1.  **Submit Source Evidence:** Provide the API specification, schema, or source code.\n2.  **Select Primary Format:** Confirm which format (e.g., OpenAPI vs. Protobuf) will serve as the primary source of truth.\n3.  **Define Maintenance Workflow:** Determine if documentation updates will be manual or automated via a build pipeline.\n\n**Acceptance Criteria Status:**\n*   [ ] Format Alignment: *Pending Source*\n*   [ ] Completeness: *Pending Source*\n*   [ ] Validation: *Pending Source*\n*   [ ] Example Accuracy: *Pending Source*\n*   [ ] Review: *In Progress (Proposal Review Complete)*",
+      "provider": "local",
+      "confidence": "medium",
+      "validation": "artifact format only; code not executed",
+      "local_only_data": true
+    }
+  }
+}

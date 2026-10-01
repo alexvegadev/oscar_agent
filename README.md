@@ -37,6 +37,17 @@ cargo run -p oscar-cli -- run "Document a parser interface" --out docs-run
 
 Each `--out` directory must be new and have an existing parent. Existing output directories are never overwritten. Mock workers return demonstration artifacts; they do not implement the requested feature.
 
+Both `plan` and `run` show progress on stderr as they load configuration, prepare
+the plan, execute workers, and save files. In an interactive terminal, an Indicatif
+spinner updates the current stage and elapsed time in place every 100 ms. It is
+cleared when the stage ends, including on failure or cancellation. Redirected
+stderr and unsupported terminals receive plain stage start/end messages without
+animation or periodic repeated lines. Progress does not include prompts, model
+output, or credentials. Use `--quiet` (or `-q`) to suppress progress; final stdout
+summaries and errors remain visible.
+Execution progress covers the overall worker stage, not individual tasks or a
+percentage of completion. Detailed routing and validation remain in `run.json`.
+
 ### Generated files
 
 ```text

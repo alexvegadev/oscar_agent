@@ -50,11 +50,34 @@ fn cli_runs_offline_and_refuses_to_overwrite_artifacts() {
             .all(|c| c["simulation"] == true)
     );
     assert!(dir.join("artifacts/T03.md").exists());
+    let progress = String::from_utf8_lossy(&result.stderr);
+    assert!(progress.contains("Generating and validating heuristic plan"));
+    assert!(progress.contains("Executing proposal workers (5 planned tasks)"));
+    assert!(progress.contains("Saving run report and artifacts"));
+    assert!(!progress.contains("JWT"));
+    assert!(!progress.contains("still working") && !progress.contains('\u{1b}'));
     let again = Command::new(env!("CARGO_BIN_EXE_oscar"))
         .args(args)
         .output()
         .unwrap();
     assert!(!again.status.success());
+
+    let quiet_dir = output_dir();
+    let quiet = Command::new(env!("CARGO_BIN_EXE_oscar"))
+        .args([
+            "run",
+            "Document a parser",
+            "--quiet",
+            "--config",
+            config.to_str().unwrap(),
+            "--out",
+            quiet_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(quiet.status.success());
+    assert!(quiet.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&quiet.stdout).contains("Outcome: Completed"));
 }
 #[test]
 fn cli_plan_reloads_canonical_json_and_test_needs_no_config() {
@@ -126,6 +149,10 @@ fn inference_failure_is_reported_without_a_saved_plan_and_can_be_overridden() {
             .output()
             .unwrap();
         assert!(!result.status.success()); // Demo mock emits prose, not a plan.
+        assert!(
+            String::from_utf8_lossy(&result.stderr)
+                .contains("Generating and validating plan with inference: failed")
+        );
         let report: serde_json::Value =
             serde_json::from_slice(&fs::read(out.join("planning.json")).unwrap()).unwrap();
         assert_eq!(report["outcome"], "failed");
@@ -170,8 +197,10 @@ fn inference_failure_is_reported_without_a_saved_plan_and_can_be_overridden() {
 #[test]
 fn plan_and_run_use_http_inference_then_execute_the_generated_dag() {
     use std::{
-        io::{Read, Write},
+        io::{BufRead, BufReader, Read, Write},
         net::TcpListener,
+        process::Stdio,
+        sync::mpsc,
         time::{Duration, Instant},
     };
     for command in ["plan", "run"] {
@@ -196,8 +225,8 @@ api_url = "http://{addr}/v1/chat/completions"
 context_window = 32768
 capabilities = ["planning", "documentation"]
 [limits]
-call_timeout_ms = 5000
-run_timeout_ms = 10000
+call_timeout_ms = 15000
+run_timeout_ms = 20000
 "#,
                 if command == "plan" {
                     "heuristic"
@@ -208,6 +237,8 @@ run_timeout_ms = 10000
         )
         .unwrap();
         let calls = if command == "run" { 2 } else { 1 };
+        let (progress_tx, progress_rx) = mpsc::channel();
+        let check_live_progress = command == "plan";
         let server = std::thread::spawn(move || {
             let mut requests = Vec::new();
             for call in 0..calls {
@@ -262,6 +293,18 @@ run_timeout_ms = 10000
                     )
                     .unwrap(),
                 );
+                if check_live_progress && call == 0 {
+                    // Piped stderr emits the start immediately, then stays quiet
+                    // while inference is pending (no animation or heartbeat).
+                    assert_eq!(
+                        progress_rx.recv_timeout(Duration::from_secs(8)).unwrap(),
+                        "started"
+                    );
+                    assert!(matches!(
+                        progress_rx.recv_timeout(Duration::from_millis(5200)),
+                        Err(mpsc::RecvTimeoutError::Timeout)
+                    ));
+                }
                 let content = if call == 0 {
                     serde_json::json!({"tasks":[{"id":"custom_schema","title":"Model-selected schema documentation","description":"Describe CSV column constraints and provide acceptance examples.","kind":"document","difficulty":"low","risk":"low","dependencies":[],"required_capabilities":["documentation"],"context_requirements":[],"expected_outputs":["Column specification"]}]}).to_string()
                 } else {
@@ -285,12 +328,29 @@ run_timeout_ms = 10000
         if command == "plan" {
             process.args(["--planner", "inference"]);
         }
-        let result = process.output().unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+        process.stderr(Stdio::piped()).stdout(Stdio::piped());
+        let mut child = process.spawn().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let reader = std::thread::spawn(move || {
+            let mut collected = String::new();
+            for line in BufReader::new(stderr).lines() {
+                let line = line.unwrap();
+                if check_live_progress {
+                    if line == "[oscar] Generating and validating plan with inference" {
+                        progress_tx.send("started").unwrap();
+                    } else if line.contains("with inference") {
+                        let _ = progress_tx.send("unexpected update");
+                    }
+                }
+                collected.push_str(&line);
+                collected.push('\n');
+            }
+            collected
+        });
+        let result = child.wait_with_output().unwrap();
+        let stderr = reader.join().unwrap();
+        assert!(result.status.success(), "{}", stderr);
+        assert!(!stderr.contains("still working") && !stderr.contains('\u{1b}'));
         let requests = server.join().unwrap();
         assert_eq!(requests.len(), calls);
         assert!(

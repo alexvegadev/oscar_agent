@@ -1,5 +1,6 @@
 use crate::error::CliError;
-use clap::{Arg, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use oscar_core::{
     config::{Config, PlannerMode},
     error::OscarError,
@@ -9,12 +10,85 @@ use oscar_core::{
 };
 use std::{
     fs::{self, OpenOptions},
+    future::Future,
     io::{Read, Write},
     path::{Path, PathBuf},
+    time::Duration,
 };
+
+fn status(quiet: bool, message: &str) {
+    if !quiet {
+        eprintln!("[oscar] {message}");
+    }
+}
+
+struct Spinner(ProgressBar);
+
+impl Spinner {
+    fn new(stage: &str, target: ProgressDrawTarget) -> Result<Self, CliError> {
+        let style =
+            ProgressStyle::with_template("{spinner:.cyan} [oscar] {wide_msg} [{elapsed_precise}]")
+                .map_err(|_| OscarError::Config("invalid progress style".into()))?
+                .tick_strings(&["|", "/", "-", "\\", " "]);
+        let bar = ProgressBar::with_draw_target(None, target).with_style(style);
+        bar.set_message(stage.to_owned());
+        Ok(Self(bar))
+    }
+}
+
+impl Drop for Spinner {
+    fn drop(&mut self) {
+        // Clear the transient display even when the operation future is dropped.
+        self.0.finish_and_clear();
+    }
+}
+
+// Poll the operation and spinner together, without a background ticking thread.
+// Existing inference deadlines/cancellation still govern the operation.
+async fn with_progress<T>(
+    quiet: bool,
+    stage: &str,
+    operation: impl Future<Output = Result<T, CliError>>,
+) -> Result<T, CliError> {
+    if quiet {
+        return operation.await;
+    }
+    let spinner = Spinner::new(stage, ProgressDrawTarget::stderr())?;
+    let animated = !spinner.0.is_hidden();
+    if !animated {
+        status(false, stage);
+    }
+    let started = tokio::time::Instant::now();
+    let period = Duration::from_millis(100);
+    let mut ticks = tokio::time::interval_at(started + period, period);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    tokio::pin!(operation);
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut operation => {
+                drop(spinner);
+                status(false, &format!("{stage}: {} ({}s elapsed)",
+                    if result.is_ok() { "finished" } else { "failed" },
+                    started.elapsed().as_secs()));
+                return result;
+            }
+            _ = ticks.tick(), if animated => {
+                spinner.0.tick();
+            }
+        }
+    }
+}
 
 fn common(name: &'static str) -> Command {
     Command::new(name)
+        .arg(
+            Arg::new("quiet")
+                .long("quiet")
+                .short('q')
+                .action(ArgAction::SetTrue)
+                .help("Suppress progress messages on stderr; keep summaries and errors"),
+        )
         .arg(
             Arg::new("request")
                 .value_name("REQUEST")
@@ -125,6 +199,8 @@ pub(super) fn run_handle(args: &ArgMatches) -> Result<(), CliError> {
     handle(args, true)
 }
 fn handle(args: &ArgMatches, run: bool) -> Result<(), CliError> {
+    let quiet = args.get_flag("quiet");
+    status(quiet, "Loading configuration");
     let mut config = Config::load_from_file(argument(args, "config")?)?;
     if let Some(mode) = args.get_one::<String>("planner") {
         config.planning.mode = if mode == "inference" {
@@ -158,7 +234,20 @@ fn handle(args: &ArgMatches, run: bool) -> Result<(), CliError> {
             } else {
                 Providers::default()
             };
-            let plan = prepare(args, &mut config, &path, &providers, cancel.clone(), run).await?;
+            let stage = if args.get_one::<String>("plan").is_some() {
+                "Loading and validating saved plan"
+            } else if uses_inference {
+                "Generating and validating plan with inference"
+            } else {
+                "Generating and validating heuristic plan"
+            };
+            let plan = with_progress(
+                quiet,
+                stage,
+                prepare(args, &mut config, &path, &providers, cancel.clone(), run),
+            )
+            .await?;
+            status(quiet, "Saving plan files");
             write_plan(&path, &plan)?;
             if !run {
                 println!(
@@ -172,8 +261,15 @@ fn handle(args: &ArgMatches, run: bool) -> Result<(), CliError> {
                 );
                 return Ok(());
             }
-            let report =
-                execution::execute(plan, config, providers, Validators::new(), cancel).await?;
+            let stage = format!(
+                "Executing proposal workers ({} planned tasks)",
+                plan.tasks.len()
+            );
+            let report = with_progress(quiet, &stage, async {
+                Ok(execution::execute(plan, config, providers, Validators::new(), cancel).await?)
+            })
+            .await?;
+            status(quiet, "Saving run report and artifacts");
             write_report(&path, report)
         }
         .await;
@@ -215,4 +311,45 @@ fn write_report(path: &Path, report: execution::RunReport) -> Result<(), CliErro
         .into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    use indicatif::InMemoryTerm;
+
+    #[test]
+    fn spinner_redraws_one_line_and_clears_on_drop() {
+        let terminal = InMemoryTerm::new(6, 100);
+        let spinner = Spinner::new(
+            "Generating plan",
+            ProgressDrawTarget::term_like(Box::new(terminal.clone())),
+        )
+        .unwrap();
+        assert!(!spinner.0.is_hidden());
+        for _ in 0..20 {
+            spinner.0.tick();
+            spinner.0.force_draw();
+            let screen = terminal.contents();
+            assert_eq!(
+                screen
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .count(),
+                1
+            );
+            assert!(screen.contains("Generating plan") && screen.contains("00:00"));
+        }
+        drop(spinner);
+        assert!(terminal.contents().trim().is_empty());
+    }
+
+    #[tokio::test]
+    async fn quiet_progress_preserves_operation_errors() {
+        let result = with_progress(true, "Hidden stage", async {
+            Err::<(), _>(OscarError::Cancelled.into())
+        })
+        .await;
+        assert!(result.is_err());
+    }
 }
