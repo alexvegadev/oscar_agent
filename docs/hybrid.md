@@ -16,8 +16,12 @@ cargo run -p oscar-cli -- plan "Add JWT authentication and protect admin endpoin
 cargo run -p oscar-cli -- run --plan auth-plan/.plan/plan.json --out auth-run
 ```
 
-Each output directory must be new, with an existing parent. `plan` performs no
-inference. `run` writes the plan before invoking workers, then writes `run.json`
+Each output directory must be new, with an existing parent. By default, `plan`
+uses offline heuristics. Set `planning.mode = "inference"` or use `--planner inference`
+with a generative provider declaring `planning` to generate the full task DAG in
+either command. See [inference planning](inference-planning.md) for configuration,
+shared budgets, validation and the additional `planning.json` report.
+`run` writes the plan before invoking workers, then writes `run.json`
 and `artifacts/<task-id>.md`. Expected output names in tasks are descriptive;
 they never authorize arbitrary filesystem writes. Failed/cancelled runs also
 write their terminal report and any collected artifacts. A configuration/plan

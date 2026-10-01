@@ -1,6 +1,10 @@
 # Offline demo. Set provider = "openai_compatible" with --features http for real inference.
 work_mode = "mixed"
 
+[planning]
+mode = "heuristic" # Use "inference" with a generative provider declaring "planning".
+local_only_data = false
+
 [features]
 skills_enabled = false
 mcp_enabled = false
@@ -20,6 +24,18 @@ model = "remote-demo"
 context_window = 128000
 max_concurrency = 1
 capabilities = ["code_generation", "code_analysis", "refactoring", "documentation", "testing", "summarization", "advanced_reasoning", "architecture", "review", "planning"]
+
+# Proposed classifier settings; not implemented (see docs/decision-classification.md).
+# [decision_engine.local]
+# enabled = true
+# api = "http://localhost:8082/v1"
+# api_key = "none"
+#
+# [decision_engine.remote]
+# enabled = false
+# provider = "jev"
+# api_key = ""
+
 
 [routing]
 local_first = true

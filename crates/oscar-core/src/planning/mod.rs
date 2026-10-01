@@ -5,6 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+pub mod inference;
 mod renderer;
 
 macro_rules! classification {
@@ -278,7 +279,7 @@ pub fn plan_request(goal: &str, config: &Config) -> Result<Plan, OscarError> {
             expected_outputs: vec![format!("{id}.md")], validation: ValidationStrategy::NonEmpty,
             escalation_policy: EscalationPolicy { allow_remote: true, max_local_attempts: config.routing.max_local_attempts },
             context_strategy: if config.routing.context_distillation { ContextStrategy::Distilled } else { ContextStrategy::Direct },
-            reason: String::new(), local_only_data: false,
+            reason: String::new(), local_only_data: config.planning.local_only_data,
         };
         let decision = routing::select(config, &task, 0, goal.len() + description.len() + 256)?;
         task.preferred_provider = decision.provider;

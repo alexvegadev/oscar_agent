@@ -52,6 +52,9 @@ OUTPUT_DIRECTORY/
 
 `plan` writes only the plan files. `run` also writes the report and collected artifacts. `PLAN.md` is rendered from the structured plan, so there is one source of truth.
 
+With inference planning enabled, both commands additionally write `planning.json`
+with the planner's outcome, routing, elapsed time and token usage.
+
 See the generated [JWT example plan](examples/hybrid-plan/PLAN.md) and its [canonical JSON](examples/hybrid-plan/.plan/plan.json).
 
 ## Work modes
@@ -68,7 +71,7 @@ work_mode = "mixed"
 | `full_remote` | All inference uses the remote provider; no local inference fallback. |
 | `mixed` | Local-first execution with remote reasoning when quality, capability/context gaps, or failed local attempts justify it. |
 
-The legacy TOML value `remote` is accepted as an alias for `full_remote`. Deterministic planning and validation run on the host in every mode.
+The legacy TOML value `remote` is accepted as an alias for `full_remote`. Plan validation runs on the host in every mode; optional inference planning follows the same strict work modes as workers.
 
 Use a different configuration file with `--config`:
 
@@ -117,6 +120,34 @@ Configure `provider = "openai_compatible"`, the model, capabilities, context win
 
 See [hybrid configuration and execution](docs/hybrid.md) for complete provider examples, resource limits, cost metadata, cancellation semantics, and persistence behavior.
 
+### Generate the full plan with inference
+
+Enable the model planner in your TOML:
+
+```toml
+[planning]
+mode = "inference"
+local_only_data = true # Use false to permit remote inference within your work mode.
+```
+
+The model generates goal-specific tasks, dependencies and expected outputs. OSCAR
+validates the DAG and supplies routing and policy fields. Configure a generative
+provider with the `planning` capability. Start from
+[examples/inference-config.toml](examples/inference-config.toml), replacing its
+model and endpoint with your local server:
+
+```bash
+cargo run -p oscar-cli --features http -- plan "Design a CSV importer with duplicate detection and tests" --config examples/inference-config.toml --out csv-plan
+cargo run -p oscar-cli --features http -- run "Design a CSV importer with duplicate detection and tests" --config examples/inference-config.toml --out csv-run
+```
+
+`plan` saves the generated plan for inspection; `run` generates and then executes
+its proposal workers. `--planner inference` overrides the TOML setting;
+`--planner heuristic` keeps the offline templates. `--plan` loads a saved plan
+without another planning call. The supplied mock demo does not generate JSON
+plans. See [inference planning](docs/inference-planning.md) for limits, reports,
+failure behavior and the distinction from proposed Laya/JEV classification.
+
 ## Architecture
 
 ```text
@@ -151,7 +182,7 @@ The workspace currently has two crates:
 | Location | Responsibility |
 | --- | --- |
 | `crates/oscar-core/src/config.rs` | Work modes, provider metadata, routing configuration, and limits. |
-| `crates/oscar-core/src/planning/` | Typed tasks, request heuristics, DAG validation, JSON plans, and Markdown rendering. |
+| `crates/oscar-core/src/planning/` | Typed tasks, heuristic/inference planners, DAG validation, JSON plans, and Markdown rendering. |
 | `crates/oscar-core/src/routing.rs` | Explainable provider selection, context fit, escalation, and cost checks. |
 | `crates/oscar-core/src/providers/` and `providers.rs` | Provider-neutral async inference, mocks, and the optional HTTP adapter. |
 | `crates/oscar-core/src/context.rs` | Shared artifacts, dependency context, and bounded excerpts. |
@@ -171,7 +202,7 @@ High model confidence never overrides failed validation. A passing registered va
 Current limitations:
 
 - Workers produce proposal artifacts; they do not automatically read repositories, apply patches, or run compiler/test commands.
-- Request classification uses keyword heuristics and can miss important risks.
+- The default planner uses keyword heuristics. The inference planner generates a full DAG, but structural validation does not prove plan completeness or risk accuracy.
 - Context distillation uses excerpts and can omit relevant evidence.
 - Provider capabilities and prices are operator-supplied metadata.
 - HTTP behavior is tested with loopback fixtures, not certified against live providers.
@@ -184,8 +215,9 @@ Saved plans and artifacts contain user content. `--out` explicitly opts into per
 
 Checked items describe the implemented hybrid proposal slice. Broader agent features remain separate acceptance gates.
 
-Current implementation priority is the tool boundary, which unlocks safe repository
-access and the later agent loop. The dependency/API release audit remains open and
+Full-plan inference is available ahead of the remaining tool work at user request.
+The next tool boundary work unlocks safe repository access and the later agent loop.
+The dependency/API release audit remains open and
 must finish before release; it does not block this incremental boundary work.
 
 ### Implemented hybrid slice
@@ -223,6 +255,8 @@ credential-free example with `cargo run -p oscar-core --example tool_registry`.
 
 ### Planning and memory
 
+- [x] Add opt-in full-plan inference to `plan` and `run`, with host-owned policy,
+  validated dependencies, bounded calls, usage reports and TOML/CLI selection.
 - [ ] Evaluate planner accuracy and routing quality on representative development tasks.
 - [ ] Add observable plan revisions based on execution evidence.
 - [ ] Measure semantic distillation against its extra inference cost.

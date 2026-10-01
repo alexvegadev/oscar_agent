@@ -129,7 +129,10 @@ integration is implied by the library registry. The release audit remains requir
   local-first provider routing, bounded inference/escalation and artifact reports.
   This does not complete tool execution, plan revision or session memory gates.
 
-- [ ] Planner is optional and replaceable.
+- [x] Planner is optional and replaceable: heuristic/inference selection, injected
+  model providers and validated saved plans; both CLI commands support inference.
+  Full-plan inference was prioritized at user request before remaining repository
+  tools. Host policy, strict modes and shared invocation budgets remain enforced.
 - [ ] Plan revisions and run state are observable.
 - [ ] Optional answer-classification stage supports local Laya and remote JEV/other
   adapters through a typed contract, explicit TOML opt-in, evaluated thresholds,

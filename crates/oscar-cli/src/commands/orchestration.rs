@@ -1,10 +1,10 @@
 use crate::error::CliError;
 use clap::{Arg, ArgMatches, Command};
 use oscar_core::{
-    config::Config,
+    config::{Config, PlannerMode},
     error::OscarError,
     execution::{self, CancellationToken, Outcome, Validators},
-    planning::{Plan, plan_request},
+    planning::{Plan, inference, plan_request},
     providers::Providers,
 };
 use std::{
@@ -33,13 +33,21 @@ fn common(name: &'static str) -> Command {
                 .help("New output directory; existing directories are never overwritten"),
         )
         .arg(
+            Arg::new("planner")
+                .long("planner")
+                .value_parser(["heuristic", "inference"])
+                .conflicts_with("plan")
+                .help("Override planning.mode from TOML"),
+        )
+        .arg(
             Arg::new("plan")
                 .long("plan")
                 .help("Load a canonical JSON plan instead of analyzing a request"),
         )
 }
 pub(super) fn plan_command() -> Command {
-    common("plan").about("Write canonical .plan/plan.json and PLAN.md without inference")
+    common("plan")
+        .about("Create a validated plan with the configured heuristic or inference planner")
 }
 pub(super) fn run_command() -> Command {
     common("run").about("Plan and execute proposal workers; persist artifacts and inference report")
@@ -52,8 +60,14 @@ fn argument<'a>(args: &'a ArgMatches, key: &'static str) -> Result<&'a str, CliE
             argument: key,
         })
 }
-fn prepare(args: &ArgMatches) -> Result<(Config, Plan, PathBuf), CliError> {
-    let config = Config::load_from_file(argument(args, "config")?)?;
+async fn prepare(
+    args: &ArgMatches,
+    config: &mut Config,
+    path: &Path,
+    providers: &Providers,
+    cancel: CancellationToken,
+    run: bool,
+) -> Result<Plan, CliError> {
     let plan = if let Some(path) = args.get_one::<String>("plan") {
         let mut text = String::new();
         fs::File::open(path)
@@ -61,12 +75,29 @@ fn prepare(args: &ArgMatches) -> Result<(Config, Plan, PathBuf), CliError> {
             .take(2_097_153)
             .read_to_string(&mut text)
             .map_err(|_| OscarError::Io("cannot read UTF-8 plan".into()))?;
-        Plan::from_json(&text, &config)?
+        let mut plan = Plan::from_json(&text, config)?;
+        if config.planning.local_only_data {
+            for task in &mut plan.tasks {
+                task.local_only_data = true;
+                task.escalation_policy.allow_remote = false;
+            }
+        }
+        plan
+    } else if config.planning.mode == PlannerMode::Inference {
+        let result =
+            inference::generate(argument(args, "request")?, config, providers, cancel).await;
+        let report = serde_json::to_string_pretty(&result.report)
+            .map_err(|_| OscarError::Io("cannot serialize planning report".into()))?;
+        write_new(&path.join("planning.json"), &report)?;
+        let plan = result.plan?;
+        if run {
+            *config = result.report.remaining_config(config)?;
+        }
+        plan
     } else {
-        plan_request(argument(args, "request")?, &config)?
+        plan_request(argument(args, "request")?, config)?
     };
-    let path = PathBuf::from(argument(args, "out")?);
-    Ok((config, plan, path))
+    Ok(plan)
 }
 fn write_new(path: &Path, text: &str) -> Result<(), OscarError> {
     let mut file = OpenOptions::new()
@@ -82,32 +113,36 @@ fn write_new(path: &Path, text: &str) -> Result<(), OscarError> {
 fn write_plan(path: &Path, plan: &Plan) -> Result<(), OscarError> {
     let json = plan.to_json()?;
     let markdown = plan.render_markdown()?;
-    fs::create_dir(path).map_err(|_| {
-        OscarError::Io("--out must name a new directory under an existing parent".into())
-    })?;
     fs::create_dir(path.join(".plan"))
         .map_err(|_| OscarError::Io("cannot create plan directory".into()))?;
     write_new(&path.join(".plan/plan.json"), &json)?;
     write_new(&path.join("PLAN.md"), &markdown)
 }
 pub(super) fn plan_handle(args: &ArgMatches) -> Result<(), CliError> {
-    let (_, plan, path) = prepare(args)?;
-    write_plan(&path, &plan)?;
-    println!(
-        "Wrote PLAN.md and .plan/plan.json ({} tasks; no inference).",
-        plan.tasks.len()
-    );
-    Ok(())
+    handle(args, false)
 }
 pub(super) fn run_handle(args: &ArgMatches) -> Result<(), CliError> {
-    let (config, plan, path) = prepare(args)?;
-    let providers = Providers::from_config(&config)?;
-    write_plan(&path, &plan)?;
+    handle(args, true)
+}
+fn handle(args: &ArgMatches, run: bool) -> Result<(), CliError> {
+    let mut config = Config::load_from_file(argument(args, "config")?)?;
+    if let Some(mode) = args.get_one::<String>("planner") {
+        config.planning.mode = if mode == "inference" {
+            PlannerMode::Inference
+        } else {
+            PlannerMode::Heuristic
+        };
+    }
+    let path = PathBuf::from(argument(args, "out")?);
+    // Reserve the output directory before any potentially billable call.
+    fs::create_dir(&path).map_err(|_| {
+        OscarError::Io("--out must name a new directory under an existing parent".into())
+    })?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(|_| OscarError::Config("cannot create async runtime".into()))?;
-    let report = runtime.block_on(async {
+    runtime.block_on(async {
         let cancel = CancellationToken::new();
         let signal = cancel.clone();
         let listener = tokio::spawn(async move {
@@ -115,10 +150,38 @@ pub(super) fn run_handle(args: &ArgMatches) -> Result<(), CliError> {
                 signal.cancel();
             }
         });
-        let result = execution::execute(plan, config, providers, Validators::new(), cancel).await;
+        let result = async {
+            let uses_inference = args.get_one::<String>("plan").is_none()
+                && config.planning.mode == PlannerMode::Inference;
+            let providers = if run || uses_inference {
+                Providers::from_config(&config)?
+            } else {
+                Providers::default()
+            };
+            let plan = prepare(args, &mut config, &path, &providers, cancel.clone(), run).await?;
+            write_plan(&path, &plan)?;
+            if !run {
+                println!(
+                    "Wrote PLAN.md and .plan/plan.json ({} tasks; {} planner).",
+                    plan.tasks.len(),
+                    if uses_inference {
+                        "inference; see planning.json"
+                    } else {
+                        "saved/heuristic; no inference"
+                    }
+                );
+                return Ok(());
+            }
+            let report =
+                execution::execute(plan, config, providers, Validators::new(), cancel).await?;
+            write_report(&path, report)
+        }
+        .await;
         listener.abort();
         result
-    })?;
+    })
+}
+fn write_report(path: &Path, report: execution::RunReport) -> Result<(), CliError> {
     let json = serde_json::to_string_pretty(&report)
         .map_err(|_| OscarError::Io("cannot serialize run report".into()))?;
     write_new(&path.join("run.json"), &json)?;

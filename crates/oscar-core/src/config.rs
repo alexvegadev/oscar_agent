@@ -38,11 +38,29 @@ pub struct Config {
     pub work_mode: WorkMode,
     #[serde(default)]
     pub features: Features,
+    #[serde(default)]
+    pub planning: Planning,
     pub providers: HashMap<String, Provider>,
     #[serde(default)]
     pub routing: Routing,
     #[serde(default)]
     pub limits: Limits,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlannerMode {
+    #[default]
+    Heuristic,
+    Inference,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Planning {
+    pub mode: PlannerMode,
+    /// Restrict both planning inference and every generated task to local data use.
+    pub local_only_data: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

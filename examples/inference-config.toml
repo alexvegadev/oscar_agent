@@ -1,0 +1,25 @@
+# Start an OpenAI-compatible generative model server at this loopback endpoint.
+# Replace model with the identifier served by your server. No model is downloaded.
+work_mode = "local"
+
+[planning]
+mode = "inference"
+local_only_data = true
+
+[providers.local]
+enabled = true
+provider = "openai_compatible"
+model = "your-local-model"
+api_url = "http://127.0.0.1:8080/v1/chat/completions"
+context_window = 32768
+max_concurrency = 1
+capabilities = ["planning", "code_analysis", "code_generation", "testing", "documentation", "review", "advanced_reasoning"]
+
+[limits]
+max_tasks = 16
+max_input_bytes = 16000
+max_output_bytes = 65536
+max_output_tokens = 8192
+call_timeout_ms = 120000
+run_timeout_ms = 600000
+max_remote_calls = 0
