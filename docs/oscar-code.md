@@ -20,7 +20,11 @@ visual review on a native display have not been verified.
 ## Conversation
 
 Enter creates a new line. **Send** submits one inference request using the
-conversation so far. Responses render selectable Markdown, including code
+conversation so far. HTTP providers stream text as it arrives; the in-progress
+Markdown preview is provisional. Only a successful reply enters conversation
+history. Stop, Reset, failure or a limit discards the preview. A single latest
+bounded snapshot coalesces updates when rendering is slower than inference.
+Responses render selectable Markdown, including code
 blocks. External images and links are disabled so model-produced Markdown cannot
 load files, contact another server, or open applications.
 
@@ -82,7 +86,7 @@ accumulating uncancellable writes.
 - [x] User/model/system rendering, Markdown, multiline input, Send/Stop/Reset.
 - [x] Existing mock and optional HTTP inference providers, bounded background work.
 - [x] Non-secret TOML preferences, provider selection, dark/light theme, limits.
-- [ ] Native provider token streaming (core currently exposes complete responses).
+- [x] Native provider text streaming, bounded previews, cancellation and final usage metadata.
 - [ ] Typed tool-call/result messages with nested structured output.
 - [ ] Autonomous model → registry tool → model runtime and runtime event subscription.
 - [ ] High-impact tool opt-in and exact-call approval dialogs; no such tools enabled.

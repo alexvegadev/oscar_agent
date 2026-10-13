@@ -48,3 +48,8 @@ The interactive prompt uses Crossterm event streaming for immediate slash-comman
 recommendations and bounded Unicode-aware line editing. A scoped raw-mode guard
 restores the terminal when its future is dropped. Redirected input retains the
 plain line protocol; no terminal history is persisted.
+
+## Subsequent streaming decision
+
+[ADR 0009](0009-native-provider-streaming.md) supersedes the streaming deferral
+above. Native SSE and bounded CLI/desktop previews are now implemented.

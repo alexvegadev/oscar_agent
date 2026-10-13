@@ -116,7 +116,8 @@ the registered tool/approval boundary. No live cloud provider or separate Rust
 1.85 toolchain was tested. Request classification is heuristic, distillation uses
 marked excerpts, and provider capabilities/prices are operator assertions.
 There is no durable resume, semantic retrieval, requests-per-minute scheduler,
-streaming, automatic test runner, or billing reconciliation. Server-side inference
+automatic test runner, or billing reconciliation. Native provider streaming was
+subsequently added; planners and artifact workers still validate complete output. Server-side inference
 may continue after client cancellation.
 
 Next implement authorized read-only repository tools and host compiler/test

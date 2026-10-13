@@ -16,10 +16,36 @@ mod http;
 
 pub type ModelFuture<'a> =
     Pin<Box<dyn Future<Output = Result<ModelOutput, OscarError>> + Send + 'a>>;
+/// Inline text delivery with no queue. Sinks must be nonblocking and bounded.
+/// Returning an error aborts inference; dropping the future cancels client work.
+/// Deltas are provisional until the future returns a successful final output.
+/// A delta may contain multiple tokens and is always complete UTF-8 text.
+pub type ModelTextSink<'a> = dyn FnMut(&str) -> Result<(), OscarError> + Send + 'a;
 /// Implementations must be nonblocking, cancellation-safe on drop, and inference-only.
 /// Never execute model-generated tools here. Host adapters must enforce output limits.
 pub trait ModelProvider: Send + Sync {
     fn infer(&self, request: ModelRequest) -> ModelFuture<'_>;
+
+    /// Native adapters override this to deliver text as it arrives. Legacy
+    /// providers deliver their complete response once, without simulated tokens.
+    /// Final output carries authoritative content, confidence and token usage.
+    fn infer_stream<'a>(
+        &'a self,
+        request: ModelRequest,
+        sink: &'a mut ModelTextSink<'_>,
+    ) -> ModelFuture<'a> {
+        Box::pin(async move {
+            let limit = request.max_output_bytes;
+            let output = self.infer(request).await?;
+            if output.content.len() > limit {
+                return Err(OscarError::Limit("model output exceeds byte limit".into()));
+            }
+            if !output.content.is_empty() {
+                sink(&output.content)?;
+            }
+            Ok(output)
+        })
+    }
 }
 #[derive(Clone)]
 pub struct ModelRequest {

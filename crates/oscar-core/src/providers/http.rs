@@ -1,6 +1,5 @@
 use super::*;
 use reqwest::{Client, Url};
-use serde::Deserialize;
 use std::{net::IpAddr, time::Duration};
 
 pub(super) struct HttpProvider {
@@ -56,32 +55,22 @@ impl HttpProvider {
         })
     }
 }
-#[derive(Deserialize)]
-struct Response {
-    choices: Vec<Choice>,
-    usage: Option<Usage>,
-}
-#[derive(Deserialize)]
-struct Choice {
-    message: Message,
-}
-#[derive(Deserialize)]
-struct Message {
-    content: Option<String>,
-    tool_calls: Option<serde_json::Value>,
-}
-#[derive(Deserialize)]
-struct Usage {
-    prompt_tokens: Option<u64>,
-    completion_tokens: Option<u64>,
-}
 impl ModelProvider for HttpProvider {
     fn infer(&self, request: ModelRequest) -> ModelFuture<'_> {
+        Box::pin(async move { self.infer_stream(request, &mut |_| Ok(())).await })
+    }
+
+    fn infer_stream<'a>(
+        &'a self,
+        request: ModelRequest,
+        sink: &'a mut ModelTextSink<'_>,
+    ) -> ModelFuture<'a> {
         Box::pin(async move {
             let mut call = self.client.post(self.url.clone()).json(&serde_json::json!({
                 "model":self.model, "messages":[{"role":"system","content":SYSTEM}, {"role":"user","content":request.context}],
-                "max_tokens":request.max_output_tokens, "stream":false
-            }));
+                "max_tokens":request.max_output_tokens, "stream":true,
+                "stream_options":{"include_usage":true}
+            })).header(reqwest::header::ACCEPT, "text/event-stream");
             if let Some(key) = &self.key {
                 call = call.bearer_auth(key);
             }
@@ -96,62 +85,36 @@ impl ModelProvider for HttpProvider {
                     message: format!("HTTP status {}", response.status().as_u16()),
                 });
             }
-            // Cap encoded JSON as well as decoded content, including escaped Unicode.
-            let wire_limit = request
-                .max_output_bytes
-                .saturating_mul(6)
-                .saturating_add(8192);
-            let mut bytes = Vec::new();
+            if !response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| {
+                    v.split(';')
+                        .next()
+                        .unwrap_or_default()
+                        .trim()
+                        .eq_ignore_ascii_case("text/event-stream")
+                })
+            {
+                return Err(stream::invalid("expected an SSE inference response"));
+            }
+            let mut decoder =
+                stream::Decoder::new(request.max_output_bytes, request.max_output_tokens);
             while let Some(chunk) = response.chunk().await.map_err(|_| OscarError::Provider {
                 transient: true,
                 message: "response stream interrupted".into(),
             })? {
-                if bytes.len().saturating_add(chunk.len()) > wire_limit {
-                    return Err(OscarError::Limit("HTTP response exceeds wire limit".into()));
+                if decoder.feed(&chunk, sink)? {
+                    return Ok(decoder.output());
                 }
-                bytes.extend_from_slice(&chunk);
             }
-            let result: Response =
-                serde_json::from_slice(&bytes).map_err(|_| OscarError::Provider {
-                    transient: false,
-                    message: "malformed inference response".into(),
-                })?;
-            let message = result
-                .choices
-                .into_iter()
-                .next()
-                .ok_or_else(|| OscarError::Provider {
-                    transient: false,
-                    message: "empty inference choices".into(),
-                })?
-                .message;
-            if message.tool_calls.is_some() {
-                return Err(OscarError::Provider {
-                    transient: false,
-                    message: "tool calls are not supported by proposal workers".into(),
-                });
-            }
-            let content = message.content.ok_or_else(|| OscarError::Provider {
-                transient: false,
-                message: "missing text content".into(),
-            })?;
-            if content.len() > request.max_output_bytes {
-                return Err(OscarError::Limit("model output exceeds byte limit".into()));
-            }
-            Ok(ModelOutput {
-                content,
-                confidence: Confidence::Medium,
-                usage: result
-                    .usage
-                    .map(|u| TokenUsage {
-                        input: u.prompt_tokens,
-                        output: u.completion_tokens,
-                    })
-                    .unwrap_or_default(),
-            })
+            Err(stream::invalid("incomplete inference stream"))
         })
     }
 }
+
+mod stream;
 
 #[cfg(test)]
 mod tests {
@@ -202,8 +165,13 @@ mod tests {
     async fn response(status: &str, body: &str, max: usize) -> Result<ModelOutput, OscarError> {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
+        let body = if serde_json::from_str::<serde_json::Value>(body).is_ok() {
+            format!("data: {body}\n\ndata: [DONE]\n\n")
+        } else {
+            body.to_owned()
+        };
         let wire = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "HTTP/1.1 {status}\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
         let server = std::thread::spawn(move || {
@@ -236,7 +204,7 @@ mod tests {
     }
     #[tokio::test]
     async fn http_decodes_usage_and_classifies_status_without_leaking_body() {
-        let body = r#"{"choices":[{"message":{"content":"hello"}}],"usage":{"prompt_tokens":12,"completion_tokens":2}}"#;
+        let body = r#"{"choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":2}}"#;
         let result = response("200 OK", body, 100).await.unwrap();
         assert_eq!(result.content, "hello");
         assert_eq!(result.usage.input, Some(12));
@@ -250,22 +218,82 @@ mod tests {
     async fn malformed_tools_and_oversized_responses_fail_closed() {
         for body in [
             "{}",
-            r#"{"choices":[{"message":{"content":"text","tool_calls":[{"name":"shell"}]}}]}"#,
+            r#"{"choices":[{"index":0,"delta":{"content":"text","tool_calls":[{"name":"shell"}]}}]}"#,
         ] {
             assert!(response("200 OK", body, 100).await.is_err());
         }
         assert!(matches!(
             response(
                 "200 OK",
-                r#"{"choices":[{"message":{"content":"too long"}}]}"#,
+                r#"{"choices":[{"index":0,"delta":{"content":"too long"},"finish_reason":"stop"}]}"#,
                 2
             )
             .await,
             Err(OscarError::Limit(_))
         ));
         assert!(matches!(
-            response("200 OK", &"x".repeat(9000), 2).await,
+            response("200 OK", &"x".repeat(70_000), 2).await,
             Err(OscarError::Limit(_))
         ));
+    }
+    #[tokio::test]
+    async fn native_delta_arrives_before_server_completes_and_drop_closes_request() {
+        for cancel in [false, true] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let (release, wait) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                socket
+                    .set_write_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut bytes = [0; 8192];
+                let _ = socket.read(&mut bytes).unwrap();
+                let first =
+                    "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"first\"}}]}\n\n";
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{first}").as_bytes()).unwrap();
+                // The server cannot finish until the client has delivered text.
+                wait.recv_timeout(Duration::from_secs(2)).unwrap();
+                if !cancel {
+                    socket.write_all(b"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n").unwrap();
+                } else {
+                    // No further body is sent; dropping the future releases HTTP.
+                    assert_eq!(socket.read(&mut bytes).unwrap(), 0);
+                }
+            });
+            let p = HttpProvider::new(
+                &provider(&format!("http://{address}/v1/chat/completions")),
+                true,
+                2000,
+            )
+            .unwrap();
+            let token = tokio_util::sync::CancellationToken::new();
+            let mut deltas = Vec::new();
+            let mut sink = |delta: &str| {
+                deltas.push(delta.to_owned());
+                release.send(()).unwrap();
+                if cancel {
+                    token.cancel();
+                }
+                Ok(())
+            };
+            let result = tokio::select! {
+                biased;
+                _ = token.cancelled() => Err(OscarError::Cancelled),
+                result = p.infer_stream(ModelRequest { context: "test".into(), max_output_bytes: 100, max_output_tokens: 10 }, &mut sink) => result,
+            };
+            assert_eq!(deltas, ["first"]);
+            if cancel {
+                assert!(matches!(result, Err(OscarError::Cancelled)));
+            } else {
+                assert_eq!(result.unwrap().content, "first");
+            }
+            tokio::task::spawn_blocking(move || server.join().unwrap())
+                .await
+                .unwrap();
+        }
     }
 }

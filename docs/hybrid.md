@@ -200,3 +200,10 @@ Next: implement the registered read-only repository tool boundary, attach compil
 test validators with explicit authorization, evaluate planner quality on real tasks,
 and add semantic distillation only when measured token savings justify its calls.
 Patch application and shell execution require the separate tool threat review.
+
+## Provider transport
+
+OpenAI-compatible inference now uses native SSE for interactive chat, planning
+and artifact execution. Endpoints must support streaming and the usage option;
+there is no non-streaming retry. See [provider streaming and bounds](providers.md)
+for the protocol, compatibility and cancellation behavior.

@@ -15,7 +15,7 @@ An experimental GPUI desktop proposal chat is available with
 `cargo +stable run -p oscar-code --features desktop`. It supports Markdown,
 multiline input, cancellation, reset and non-secret preferences. See
 [OSCAR Code](docs/oscar-code.md) for setup and implementation-plan status.
-Native token streaming and model-initiated tools remain future work.
+Native provider text streaming is available in the CLI and desktop; model-initiated tools remain future work.
 
 Opt-in [RAG with Rig](docs/rag.md) retrieves cited chunks from explicitly loaded
 files using local Ollama embeddings:
@@ -239,7 +239,7 @@ Current limitations:
 - Provider capabilities and prices are operator-supplied metadata.
 - HTTP behavior is tested with loopback fixtures, not certified against live providers.
 - Cancellation stops client work but cannot guarantee that a remote server stops inference or billing.
-- There is no durable resume, session database, streaming, persistent retrieval index, or requests-per-minute scheduler. Semantic retrieval is opt-in for agent sessions only.
+- There is no durable resume, session database, persistent retrieval index, or requests-per-minute scheduler. Semantic retrieval is opt-in for agent sessions only.
 
 Saved plans and artifacts contain user content. `--out` explicitly opts into persistence; delete a saved run's output directory to remove it. The library keeps artifacts in memory without silently persisting them.
 
@@ -329,7 +329,7 @@ proposed TOML, Laya usage requirements, compatibility boundaries, and acceptance
 ### Integrations and hardening
 
 - [ ] Route MCP capabilities through the common tool validation and permission path.
-- [ ] Add provider conformance tests and optional streaming where useful.
+- [x] Native OpenAI-compatible SSE streaming, bounded CLI/desktop previews and offline conformance tests.
 - [ ] Expand prompt-injection, credential, filesystem, and resource-limit testing.
 - [ ] Add rate scheduling, resumable execution, and telemetry only with explicit bounds and privacy controls.
 

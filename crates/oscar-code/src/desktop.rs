@@ -180,11 +180,39 @@ impl Chat {
         self.input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.session.running(id);
-        let handle = self.runtime.spawn(run.execute(provider));
+        let (sender, mut receiver) = tokio::sync::watch::channel(String::new());
+        let mut handle = self.runtime.spawn(async move {
+            let mut text = String::new();
+            run.execute_stream(provider, &mut |delta| {
+                text.push_str(delta);
+                sender.send_replace(text.clone());
+                Ok(())
+            })
+            .await
+        });
         self.task = Some(cx.spawn(async move |this, cx| {
-            let result = handle.await.unwrap_or_else(|_| {
-                Err(OscarError::Unavailable("inference worker stopped".into()))
-            });
+            let result = loop {
+                tokio::select! {
+                    biased;
+                    result = &mut handle => break result.unwrap_or_else(|_| {
+                        Err(OscarError::Unavailable("inference worker stopped".into()))
+                    }),
+                    changed = receiver.changed() => {
+                        if changed.is_err() {
+                            break handle.await.unwrap_or_else(|_| Err(OscarError::Unavailable("inference worker stopped".into())));
+                        }
+                        let text = receiver.borrow_and_update().clone();
+                        if this.update(cx, |this, cx| {
+                            this.session.preview(id, text);
+                            this.scroll.scroll_to_bottom();
+                            cx.notify();
+                        }).is_err() {
+                            handle.abort();
+                            return;
+                        }
+                    }
+                }
+            };
             let _ = this.update(cx, |this, cx| {
                 this.session.complete(id, result);
                 this.scroll.scroll_to_bottom();
@@ -373,7 +401,8 @@ impl Render for Chat {
             .child(div().id("history").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.scroll).p_6()
                 .child(div().w_full().max_w(px(900.)).mx_auto().flex().flex_col().gap_4()
                     .when(self.session.messages.is_empty(), |view| view.child(div().p_6().child("What would you like to build?").child(div().text_sm().mt_2().child("Ask for a coding proposal. This session keeps conversation in memory."))))
-                    .children(self.session.messages.iter().enumerate().map(|(i, m)| Self::message(i, m.role, &m.content, dark)))))
+                    .children(self.session.messages.iter().enumerate().map(|(i, m)| Self::message(i, m.role, &m.content, dark)))
+                    .when(!self.session.preview.is_empty(), |view| view.child(Self::message(self.session.messages.len(), Role::Model, &self.session.preview, dark)))))
             .child(div().p_4().border_t_1().border_color(rgb(0x384355)).flex().flex_col().gap_2()
                 .child(div().text_sm().child(self.notice.clone()))
                 .child(Textarea::new(&self.input).w_full().disabled(active || self.saving).aria_label("Message OSCAR"))

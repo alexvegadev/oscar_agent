@@ -51,3 +51,8 @@ UI-test features, a CLI binary, non-secret preference TOML and documentation.
 Default workspace tests remain headless. Linux/Windows MSRV jobs test core/CLI
 all features and the desktop library's HTTP feature separately; the stable
 Windows desktop job checks all `oscar-code` features.
+
+## Subsequent streaming decision
+
+[ADR 0009](0009-native-provider-streaming.md) supersedes the streaming deferral
+above. Native SSE and bounded CLI/desktop previews are now implemented.

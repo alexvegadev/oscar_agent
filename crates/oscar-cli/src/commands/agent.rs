@@ -9,7 +9,7 @@ use oscar_core::{
         ContextStrategy, Difficulty, EscalationPolicy, ProviderPreference, RiskLevel, Task, TaskId,
         TaskKind, ValidationStrategy,
     },
-    providers::{ModelRequest, Providers},
+    providers::{ModelRequest, ModelTextSink, Providers},
     routing,
     tools::{ToolError, ToolLimits, ToolPolicy},
 };
@@ -20,7 +20,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     time::Instant,
 };
 
@@ -182,10 +182,8 @@ pub(super) fn handle(args: &ArgMatches) -> Result<(), CliError> {
                     }
                     _ if line.starts_with('/') => eprintln!("[oscar] Unknown command. Use /help."),
                     _ => {
-                        match session.respond(line, cancel.clone()).await {
-                            Ok(reply) => {
-                                println!("\nOSCAR\n{}\n", display_text(&reply));
-                            }
+                        match display_response(&mut session, line, cancel.clone()).await {
+                            Ok(()) => {}
                             Err(OscarError::Limit(message)) if message == "session context full" =>
                                 eprintln!("[oscar] Context full; use /reset before another prompt."),
                             Err(error) => return Err(error),
@@ -217,6 +215,58 @@ pub(super) fn handle(args: &ArgMatches) -> Result<(), CliError> {
         }
     );
     result.map_err(Into::into)
+}
+
+/// One latest bounded snapshot prevents a slow terminal from building a token queue.
+async fn display_response(
+    session: &mut Session,
+    prompt: &str,
+    cancel: CancellationToken,
+) -> Result<(), OscarError> {
+    let (sender, mut receiver) = tokio::sync::watch::channel(String::new());
+    let mut text = String::new();
+    let mut sink = |delta: &str| {
+        text.push_str(delta);
+        sender.send_replace(text.clone());
+        Ok(())
+    };
+    let mut operation = Box::pin(session.respond_stream(prompt, cancel, &mut sink));
+    let mut stdout = tokio::io::stdout();
+    let mut displayed = 0;
+    stdout
+        .write_all(b"\nOSCAR\n")
+        .await
+        .map_err(|_| OscarError::Io("cannot write reply".into()))?;
+    loop {
+        let result = tokio::select! {
+            biased;
+            result = &mut operation => Some(result),
+            _ = receiver.changed() => None,
+        };
+        let snapshot = receiver.borrow_and_update().clone();
+        let delta = display_text(&snapshot[displayed..]);
+        stdout
+            .write_all(delta.as_bytes())
+            .await
+            .map_err(|_| OscarError::Io("cannot write reply".into()))?;
+        stdout
+            .flush()
+            .await
+            .map_err(|_| OscarError::Io("cannot flush reply".into()))?;
+        displayed = snapshot.len();
+        if let Some(result) = result {
+            stdout
+                .write_all(b"\n\n")
+                .await
+                .map_err(|_| OscarError::Io("cannot write reply".into()))?;
+            if result.is_err() && displayed > 0 {
+                eprintln!(
+                    "[oscar] Partial reply discarded from context: inference did not complete."
+                );
+            }
+            return result.map(|_| ());
+        }
+    }
 }
 
 async fn read_line(
@@ -327,10 +377,19 @@ impl Session {
         }
         Ok(())
     }
+    #[cfg(test)]
     async fn respond(
         &mut self,
         prompt: &str,
         cancel: CancellationToken,
+    ) -> Result<String, OscarError> {
+        self.respond_stream(prompt, cancel, &mut |_| Ok(())).await
+    }
+    async fn respond_stream(
+        &mut self,
+        prompt: &str,
+        cancel: CancellationToken,
+        sink: &mut ModelTextSink<'_>,
     ) -> Result<String, OscarError> {
         if cancel.is_cancelled() {
             return Err(OscarError::Cancelled);
@@ -407,10 +466,18 @@ impl Session {
             max_output_bytes: self.config.limits.max_output_bytes,
             max_output_tokens: self.config.limits.max_output_tokens,
         };
+        let mut delivered = 0usize;
+        let mut bounded_sink = |delta: &str| {
+            delivered = delivered.saturating_add(delta.len());
+            if delivered > self.config.limits.max_output_bytes {
+                return Err(OscarError::Limit("model output exceeds byte limit".into()));
+            }
+            sink(delta)
+        };
         let reply = tokio::select! {
             biased;
             _ = cancel.cancelled() => return Err(OscarError::Cancelled),
-            result = tokio::time::timeout(Duration::from_millis(self.config.limits.call_timeout_ms), provider.infer(request)) =>
+            result = tokio::time::timeout(Duration::from_millis(self.config.limits.call_timeout_ms), provider.infer_stream(request, &mut bounded_sink)) =>
                 result.map_err(|_| OscarError::Limit("agent inference deadline exceeded".into()))??,
         };
         if reply.content.trim().is_empty() {

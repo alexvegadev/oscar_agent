@@ -188,3 +188,142 @@ fn remote_budget_survives_reset_and_provider_switches() {
     ));
     assert_eq!(session.turns, 2);
 }
+
+struct Streaming;
+impl ModelProvider for Streaming {
+    fn infer(&self, _: ModelRequest) -> ModelFuture<'_> {
+        panic!("interactive runs must use the streaming contract")
+    }
+    fn infer_stream<'a>(
+        &'a self,
+        _: ModelRequest,
+        sink: &'a mut oscar_core::providers::ModelTextSink<'_>,
+    ) -> ModelFuture<'a> {
+        Box::pin(async move {
+            sink("hé")?;
+            tokio::task::yield_now().await;
+            sink("🦀")?;
+            Ok(output("hé🦀"))
+        })
+    }
+}
+
+#[tokio::test]
+async fn native_stream_commits_once_and_provisional_text_is_not_history() {
+    let mut session = SessionState::new(Limits::default(), Settings::default());
+    let run = session.begin("Stream").unwrap();
+    let id = run.id;
+    session.running(id);
+    let mut text = String::new();
+    let result = run
+        .execute_stream(Arc::new(Streaming), &mut |delta| {
+            text.push_str(delta);
+            session.preview(id, text.clone());
+            assert_eq!(session.messages.len(), 1);
+            Ok(())
+        })
+        .await;
+    assert_eq!(session.preview, "hé🦀");
+    session.complete(id, result);
+    assert!(session.preview.is_empty());
+    assert_eq!(session.messages.len(), 2);
+    assert_eq!(session.messages[1].content, "hé🦀");
+}
+
+#[test]
+fn stop_reset_failure_and_limits_discard_previews_and_ignore_late_updates() {
+    let mut session = SessionState::new(Limits::default(), Settings::default());
+    let run = session.begin("First").unwrap();
+    session.preview(run.id, "partial".into());
+    session.preview(run.id, "x".repeat(16_385));
+    assert_eq!(session.preview, "partial");
+    session.stop();
+    session.preview(run.id, "late".into());
+    assert!(session.preview.is_empty());
+    session.reset();
+    let next = session.begin("Next").unwrap();
+    session.preview(run.id, "stale".into());
+    assert!(session.preview.is_empty());
+    session.preview(next.id, "unfinished".into());
+    session.complete(next.id, Err(OscarError::Cancelled));
+    assert!(session.preview.is_empty());
+    assert!(!session.messages.iter().any(|m| m.role == Role::Model));
+}
+
+#[tokio::test]
+async fn host_enforces_cumulative_stream_limit_before_delivery_and_sink_can_abort() {
+    let mut session = SessionState::new(
+        Limits {
+            max_output_bytes: 3,
+            ..Limits::default()
+        },
+        Settings::default(),
+    );
+    let run = session.begin("Bound").unwrap();
+    let mut text = String::new();
+    assert!(matches!(
+        run.execute_stream(Arc::new(Streaming), &mut |delta| {
+            text.push_str(delta);
+            Ok(())
+        })
+        .await,
+        Err(OscarError::Limit(_))
+    ));
+    assert_eq!(text, "hé");
+    session.reset();
+    let run = session.begin("Abort").unwrap();
+    assert!(matches!(
+        run.execute_stream(Arc::new(Streaming), &mut |_| Err(OscarError::Cancelled))
+            .await,
+        Err(OscarError::Cancelled)
+    ));
+}
+
+struct PartialPending;
+impl ModelProvider for PartialPending {
+    fn infer(&self, _: ModelRequest) -> ModelFuture<'_> {
+        Box::pin(std::future::pending())
+    }
+    fn infer_stream<'a>(
+        &'a self,
+        _: ModelRequest,
+        sink: &'a mut oscar_core::providers::ModelTextSink<'_>,
+    ) -> ModelFuture<'a> {
+        Box::pin(async move {
+            sink("partial")?;
+            std::future::pending().await
+        })
+    }
+}
+
+#[tokio::test]
+async fn deadline_and_stop_after_a_delta_discard_partial_text() {
+    for stop in [false, true] {
+        let mut session = SessionState::new(
+            Limits::default(),
+            Settings {
+                timeout_ms: 1,
+                ..Settings::default()
+            },
+        );
+        let run = session.begin("Wait after text").unwrap();
+        let id = run.id;
+        let result = run
+            .execute_stream(Arc::new(PartialPending), &mut |delta| {
+                session.preview(id, delta.into());
+                if stop {
+                    session.stop();
+                }
+                Ok(())
+            })
+            .await;
+        if stop {
+            assert!(matches!(result, Err(OscarError::Cancelled)));
+        } else {
+            assert!(matches!(result, Err(OscarError::Limit(_))));
+        }
+        session.complete(id, result);
+        assert!(session.preview.is_empty());
+        assert!(!session.messages.iter().any(|m| m.role == Role::Model));
+    }
+}

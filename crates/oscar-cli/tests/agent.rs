@@ -227,3 +227,134 @@ fn junction_escape_is_rejected() {
     assert!(!String::from_utf8_lossy(&output.stdout).contains("File loaded"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("denied"));
 }
+
+#[cfg(feature = "http")]
+#[test]
+fn native_reply_is_flushed_before_completion_and_failed_partial_is_reported() {
+    use std::{
+        io::{BufRead, BufReader, Read},
+        sync::mpsc,
+        time::Duration,
+    };
+    for fail in [false, true] {
+        let root = fixture();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let config = root.join("stream.toml");
+        fs::write(
+            &config,
+            format!(
+                r#"
+work_mode = "local"
+[providers.local]
+enabled = true
+provider = "openai_compatible"
+model = "fixture"
+api_url = "http://{address}/v1/chat/completions"
+context_window = 32768
+capabilities = ["code_analysis", "code_generation"]
+[limits]
+call_timeout_ms = 5000
+run_timeout_ms = 10000
+"#
+            ),
+        )
+        .unwrap();
+        let (release, wait) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut data = Vec::new();
+            let mut buf = [0; 4096];
+            let (start, length) = loop {
+                let count = socket.read(&mut buf).unwrap();
+                assert!(count > 0);
+                data.extend_from_slice(&buf[..count]);
+                assert!(data.len() < 65_536);
+                if let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let header = String::from_utf8_lossy(&data[..end]);
+                    let length = header
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|n| n.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap();
+                    break (end + 4, length);
+                }
+            };
+            while data.len() < start + length {
+                let count = socket.read(&mut buf).unwrap();
+                assert!(count > 0);
+                data.extend_from_slice(&buf[..count]);
+            }
+            let request: serde_json::Value =
+                serde_json::from_slice(&data[start..start + length]).unwrap();
+            assert_eq!(request["stream"], true);
+            let first = serde_json::json!({"choices":[{"index":0,"delta":{"content":"early hé🦀\u{1b}\n"}}]});
+            write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: {first}\n\n").unwrap();
+            // The terminal must flush the first delta before the server can finish.
+            wait.recv_timeout(Duration::from_secs(5)).unwrap();
+            let last = if fail {
+                serde_json::json!({"choices":[{"index":0,"delta":{"tool_calls":[{"name":"shell"}]}}]})
+            } else {
+                serde_json::json!({"choices":[{"index":0,"delta":{"content":"final"},"finish_reason":"stop"}]})
+            };
+            write!(socket, "data: {last}\n\ndata: [DONE]\n\n").unwrap();
+        });
+        let mut child = Command::new(env!("CARGO_BIN_EXE_oscar"))
+            .args([
+                "agent",
+                "Propose a change",
+                "--config",
+                config.to_str().unwrap(),
+                "--workspace",
+                root.to_str().unwrap(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (seen, observed) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut text = String::new();
+            for line in BufReader::new(stdout).lines() {
+                let line = line.unwrap();
+                if line.starts_with("early") {
+                    seen.send(line.clone()).unwrap();
+                }
+                text.push_str(&line);
+                text.push('\n');
+            }
+            text
+        });
+        let early = observed.recv_timeout(Duration::from_secs(6));
+        if early.is_err() {
+            let _ = child.kill();
+        }
+        assert_eq!(early.unwrap(), "early hé🦀");
+        release.send(()).unwrap();
+        let result = child.wait_with_output().unwrap();
+        let stdout = reader.join().unwrap();
+        server.join().unwrap();
+        assert_eq!(
+            result.status.success(),
+            !fail,
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(stdout.contains("final"), !fail);
+        if fail {
+            assert!(String::from_utf8_lossy(&result.stderr).contains("Partial reply discarded"));
+        }
+        assert!(!stdout.contains('\u{1b}'));
+    }
+}

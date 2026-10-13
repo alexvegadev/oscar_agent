@@ -3,7 +3,7 @@ use oscar_core::{
     config::Limits,
     error::OscarError,
     planning::ProviderPreference,
-    providers::{ModelOutput, ModelProvider, ModelRequest},
+    providers::{ModelOutput, ModelProvider, ModelRequest, ModelTextSink},
 };
 use std::{sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
@@ -44,6 +44,8 @@ pub struct SessionState {
     pub messages: Vec<Message>,
     pub state: RunState,
     pub turns: usize,
+    /// Provisional text, rendered separately and never included in model context.
+    pub preview: String,
     remote_calls: usize,
     remote_input_bytes: usize,
     run_id: u64,
@@ -65,6 +67,7 @@ impl SessionState {
             messages: Vec::new(),
             state: RunState::Idle,
             turns: 0,
+            preview: String::new(),
             remote_calls: 0,
             remote_input_bytes: 0,
             run_id: 0,
@@ -138,6 +141,7 @@ impl SessionState {
             role: Role::User,
             content: prompt.into(),
         });
+        self.preview.clear();
         self.state = RunState::Pending;
         Ok(Run {
             id: self.run_id,
@@ -162,11 +166,19 @@ impl SessionState {
         }
     }
 
+    /// Apply a coalesced stream snapshot only to the current active run.
+    pub fn preview(&mut self, id: u64, text: String) {
+        if id == self.run_id && self.state.active() && text.len() <= self.limits.max_output_bytes {
+            self.preview = text;
+        }
+    }
+
     pub fn complete(&mut self, id: u64, result: Result<ModelOutput, OscarError>) {
         // Discard stale results, including results racing with Stop or Reset.
         if id != self.run_id || !self.state.active() {
             return;
         }
+        self.preview.clear();
         match result {
             Ok(output) if output.content.len() <= self.limits.max_output_bytes => {
                 let retained: usize = self.messages.iter().map(|m| m.content.len()).sum();
@@ -198,6 +210,7 @@ impl SessionState {
     pub fn stop(&mut self) {
         if self.state.active() {
             self.cancellation.cancel();
+            self.preview.clear();
             self.state = RunState::Cancelled;
             self.system_message(format!("Run {} cancelled", self.run_id));
         }
@@ -259,10 +272,26 @@ impl Run {
         self,
         provider: Arc<dyn ModelProvider>,
     ) -> Result<ModelOutput, OscarError> {
+        self.execute_stream(provider, &mut |_| Ok(())).await
+    }
+    pub async fn execute_stream(
+        self,
+        provider: Arc<dyn ModelProvider>,
+        sink: &mut ModelTextSink<'_>,
+    ) -> Result<ModelOutput, OscarError> {
+        let limit = self.request.max_output_bytes;
+        let mut delivered = 0usize;
+        let mut bounded_sink = |delta: &str| {
+            delivered = delivered.saturating_add(delta.len());
+            if delivered > limit {
+                return Err(OscarError::Limit("model output exceeds byte limit".into()));
+            }
+            sink(delta)
+        };
         tokio::select! {
             biased;
             _ = self.cancellation.cancelled() => Err(OscarError::Cancelled),
-            result = tokio::time::timeout(self.timeout, provider.infer(self.request)) => result.unwrap_or_else(|_| Err(OscarError::Limit("desktop inference deadline exceeded".into()))),
+            result = tokio::time::timeout(self.timeout, provider.infer_stream(self.request, &mut bounded_sink)) => result.unwrap_or_else(|_| Err(OscarError::Limit("desktop inference deadline exceeded".into()))),
         }
     }
 }

@@ -255,6 +255,8 @@ run_timeout_ms = 20000
                         Err(e) => panic!("fixture accept: {e}"),
                     }
                 };
+                // Windows may inherit the listener's nonblocking mode.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
@@ -310,8 +312,14 @@ run_timeout_ms = 20000
                 } else {
                     "Generated schema proposal from fixture".into()
                 };
-                let body=serde_json::json!({"choices":[{"message":{"content":content}}],"usage":{"prompt_tokens":100,"completion_tokens":200}}).to_string();
-                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
+                assert_eq!(requests.last().unwrap()["stream"], true);
+                assert_eq!(
+                    requests.last().unwrap()["stream_options"]["include_usage"],
+                    true
+                );
+                let chunk = serde_json::json!({"choices":[{"index":0,"delta":{"content":content},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":200}});
+                let body = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
             }
             requests
         });

@@ -105,6 +105,22 @@ not device files or a filesystem with unbounded I/O. Provider cancellation drops
 client work but cannot guarantee that remote inference or billing stops.
 
 There is no automatic repository discovery, model-to-tool loop, patch application,
-shell execution, streaming, terminal editor or durable session resume in this
+shell execution, terminal editor or durable session resume in this
 slice. Session content remains in memory and is discarded on reset or exit;
 there is no automatic persistence. Terminal scrollback may still contain replies.
+
+## Native text streaming
+
+OpenAI-compatible providers request `stream = true` and
+`stream_options.include_usage = true`. Text appears incrementally and is flushed
+to stdout, including when redirected. Terminal control characters are filtered
+per update. A single latest bounded snapshot coalesces updates for slow output;
+there is no growing token queue. Partial replies are provisional and never added
+to history on cancellation, errors or limits; already printed text remains in
+scrollback. Mock and legacy complete-only providers emit a single reply.
+
+Endpoints must support SSE chat completions with choice index 0, a `stop` finish
+reason and `[DONE]`. Unsupported streaming fails explicitly without retrying a
+non-streaming request. Final usage is recorded when supplied; missing usage stays
+unknown. Planners and artifact workers collect the same native stream before
+validating or saving their output. See [the streaming contract](providers.md).

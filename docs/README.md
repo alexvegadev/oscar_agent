@@ -21,3 +21,9 @@ for CI, toolchain compatibility, and license metadata decisions.
 
 See [registered tool sessions](tools.md) and [ADR 0004](adr/0004-registered-tool-boundary.md)
 for the experimental library API, permissions, limits, and remaining integration work.
+
+## Provider streaming
+
+See [the provider contract and bounds](providers.md) and
+[ADR 0009](adr/0009-native-provider-streaming.md) for native SSE, CLI/desktop
+previews and complete-output compatibility.
