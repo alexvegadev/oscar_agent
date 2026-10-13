@@ -77,6 +77,17 @@ model confidence fail closed. A final review covering all branches is required
 when `routing.remote_review = "always"`, or with `auto` if a task is high/critical
 risk. Model risk estimates and plan completeness still require human judgment.
 
+Draft parse errors identify Markdown fences, reasoning markup, incomplete JSON,
+syntax errors, missing required fields, unexpected fields, invalid enums or
+schema/type mismatches, with a line and column. These diagnostics never include
+rejected field names or values, except known schema field names. For incomplete
+JSON, check `limits.max_output_tokens` and request fewer tasks or shorter
+descriptions. For Markdown or reasoning text, configure the model/server to
+return only its final JSON answer. For schema mismatches, use exactly the fields
+listed above and copy capability values from the supplied provider metadata.
+The prompt includes output budgets; the host still rejects nonconforming output
+without extracting JSON from prose or retrying the request.
+
 The host sets goal, version, work mode, routing preference/reason, nonempty
 artifact validation, retry limits, context strategy and local-only restrictions.
 The model cannot grant permissions, register tools/validators or change policy.

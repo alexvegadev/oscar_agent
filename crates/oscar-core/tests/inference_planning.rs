@@ -167,6 +167,68 @@ async fn rejects_invalid_graphs_policy_injection_and_unavailable_tasks() {
 }
 
 #[tokio::test]
+async fn draft_failures_are_actionable_without_leaking_rejected_content() {
+    let mut missing = draft();
+    missing["tasks"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("expected_outputs");
+    let mut unknown = draft();
+    unknown["SECRET_FIXTURE"] = json!("sensitive value");
+    let mut invalid_enum = draft();
+    invalid_enum["tasks"][0]["kind"] = json!("SECRET_FIXTURE");
+    let mut wrong_type = draft();
+    wrong_type["tasks"][0]["dependencies"] = json!("SECRET_FIXTURE");
+    for (text, expected) in [
+        (
+            format!("  ```json\n{}\n```", draft()),
+            "Markdown code fence",
+        ),
+        (
+            format!("<think>SECRET_FIXTURE</think>\n{}", draft()),
+            "reasoning markup",
+        ),
+        (
+            "{\"tasks\":[{\"title\":\"SECRET_FIXTURE\"".into(),
+            "incomplete JSON",
+        ),
+        (format!("{} SECRET_FIXTURE", draft()), "invalid JSON syntax"),
+        (
+            missing.to_string(),
+            "missing required field `expected_outputs`",
+        ),
+        (unknown.to_string(), "unexpected field"),
+        (invalid_enum.to_string(), "invalid enum value"),
+        (wrong_type.to_string(), "task schema mismatch"),
+        ("{\"tasks\":[],\"tasks\":[]}".into(), "duplicate JSON field"),
+    ] {
+        let (p, local, remote) = providers(text, 0, false);
+        let result = inference::generate(
+            "Document parser schema",
+            &config(),
+            &p,
+            CancellationToken::new(),
+        )
+        .await;
+        let error = result.plan.unwrap_err().to_string();
+        assert!(error.contains(expected), "{error}");
+        assert!(
+            error.contains("line ") && error.contains("column "),
+            "{error}"
+        );
+        assert_eq!(result.report.error.as_deref(), Some(error.as_str()));
+        assert!(
+            !serde_json::to_string(&result.report)
+                .unwrap()
+                .contains("SECRET_FIXTURE")
+        );
+        assert_eq!(result.report.outcome, Outcome::Failed);
+        assert_eq!(local.requests.lock().unwrap().len(), 1);
+        assert!(remote.requests.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
 async fn respects_local_only_capability_and_remote_budgets_before_calling() {
     for case in 0..6 {
         let mut c = config();

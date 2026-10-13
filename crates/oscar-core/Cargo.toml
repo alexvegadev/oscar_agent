@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 serde = { version = "1.0", features = ["derive", "rc"] }
-toml = "0.8"
+toml = "1.1.8+spec-1.1.0"
 serde_json = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }

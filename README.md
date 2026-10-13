@@ -139,7 +139,7 @@ Before remote inference, eligible dependency artifacts are reduced to bounded, e
 The optional `http` feature enables an OpenAI-compatible text chat-completions adapter:
 
 ```bash
-cargo run -p oscar-cli --features http -- run "Document this interface: ..." --config oscar.toml --out real-run
+cargo run -p oscar-cli --features http -- run "Document this interface: ..." --config settings.toml --out real-run
 ```
 
 Configure `provider = "openai_compatible"`, the model, capabilities, context window, and complete `api_url`. Prefer `api_key_env` for credentials. Local endpoints require literal loopback IPs; remote endpoints require HTTPS. Redirects and proxies are disabled.
@@ -163,8 +163,8 @@ provider with the `planning` capability. Start from
 model and endpoint with your local server:
 
 ```bash
-cargo run -p oscar-cli --features http -- plan "Design a CSV importer with duplicate detection and tests" --config examples/inference-config.toml --out csv-plan
-cargo run -p oscar-cli --features http -- run "Design a CSV importer with duplicate detection and tests" --config examples/inference-config.toml --out csv-run
+cargo run -p oscar-cli --features http -- plan "Design a CSV importer with duplicate detection and tests" --config examples/inference-config.toml --out examples/csv-plan
+cargo run -p oscar-cli --features http -- run "Design a CSV importer with duplicate detection and tests" --config examples/inference-config.toml --out examples/csv-run
 ```
 
 `plan` saves the generated plan for inspection; `run` generates and then executes
