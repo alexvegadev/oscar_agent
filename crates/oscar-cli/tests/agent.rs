@@ -94,6 +94,102 @@ fn initial_request_and_eof_complete_the_session() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("Mock proposal"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("completed"));
 }
+
+#[cfg(feature = "rag")]
+#[test]
+fn local_embeddings_are_rejected_in_strict_remote_mode_before_network_work() {
+    let root = fixture();
+    let config = root.join("remote.toml");
+    fs::write(
+        &config,
+        include_str!("../../../settings.toml")
+            .replace("work_mode = \"mixed\"", "work_mode = \"full_remote\""),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_oscar"))
+        .args([
+            "agent",
+            "--config",
+            config.to_str().unwrap(),
+            "--workspace",
+            root.to_str().unwrap(),
+            "--rag",
+            "--allow-remote-context",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("local RAG embeddings require local or mixed")
+    );
+}
+
+#[cfg(feature = "rag")]
+#[test]
+fn rig_rag_session_uses_local_embeddings_and_clears_index_on_reset() {
+    use std::{
+        io::Read,
+        time::{Duration, Instant},
+    };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let started = Instant::now();
+            let mut socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            && started.elapsed() < Duration::from_secs(5) =>
+                    {
+                        std::thread::sleep(Duration::from_millis(10))
+                    }
+                    Err(e) => panic!("embedding fixture: {e}"),
+                }
+            };
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = [0; 8192];
+            let _ = socket.read(&mut request).unwrap();
+            let body = r#"{"embeddings":[[1.0,0.0]]}"#;
+            let wire = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(wire.as_bytes()).unwrap();
+        }
+    });
+    let output = invoke(
+        &fixture(),
+        "/read source.rs\nPropose tests\n/status\n/reset\n/status\n/exit\n",
+        &[
+            "--rag",
+            "--embedding-url",
+            &format!("http://{address}/api/embed"),
+        ],
+    );
+    server.join().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("RAG chunks: 1; embedding calls: 2"));
+    assert!(stdout.contains("RAG chunks: 0; embedding calls: 2"));
+    assert!(stdout.contains("Mock proposal"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("RAG retrieved 1 chunks"));
+    assert!(!stderr.contains("fn main"));
+}
 #[cfg(unix)]
 #[test]
 fn symlink_escape_is_rejected() {

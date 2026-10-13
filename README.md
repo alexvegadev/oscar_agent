@@ -11,6 +11,16 @@ Interactive coding proposals are available with `cargo run -p oscar-cli -- agent
 follow up in the same conversation. The example configuration uses mock replies.
 See [agent mode](docs/agent-mode.md) for real-provider setup, commands and limits.
 
+Opt-in [RAG with Rig](docs/rag.md) retrieves cited chunks from explicitly loaded
+files using local Ollama embeddings:
+
+```bash
+cargo run -p oscar-cli --features rag -- agent --workspace . --rag
+```
+
+An installed local embedding model is required; completion providers remain
+configured separately. `/reset` discards the in-memory index and conversation.
+
 ## Product principles
 
 - **Local first:** use local models whenever they can do useful work; reserve cloud inference for meaningful reasoning gains and escalation.
@@ -223,7 +233,7 @@ Current limitations:
 - Provider capabilities and prices are operator-supplied metadata.
 - HTTP behavior is tested with loopback fixtures, not certified against live providers.
 - Cancellation stops client work but cannot guarantee that a remote server stops inference or billing.
-- There is no durable resume, session database, streaming, semantic retrieval, or requests-per-minute scheduler.
+- There is no durable resume, session database, streaming, persistent retrieval index, or requests-per-minute scheduler. Semantic retrieval is opt-in for agent sessions only.
 
 Saved plans and artifacts contain user content. `--out` explicitly opts into persistence; delete a saved run's output directory to remove it. The library keeps artifacts in memory without silently persisting them.
 
@@ -275,6 +285,8 @@ credential-free example with `cargo run -p oscar-core --example tool_registry`.
 
 ### Planning and memory
 
+- [x] Add opt-in Rig session retrieval with local embeddings, cited chunks,
+  bounded context and explicit reset; persistent memory and plan/run retrieval remain separate.
 - [x] Add opt-in full-plan inference to `plan` and `run`, with host-owned policy,
   validated dependencies, bounded calls, usage reports and TOML/CLI selection.
 - [ ] Evaluate planner accuracy and routing quality on representative development tasks.

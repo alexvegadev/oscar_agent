@@ -1,5 +1,10 @@
 # Interactive agent mode
 
+Optional [RAG with Rig](rag.md) indexes `/read` files in memory and supplies
+relevant cited chunks per prompt. Enable `--features rag` and `agent --rag`
+with an installed local Ollama embedding model. The full-file context behavior
+below describes the default session without RAG.
+
 Start a coding conversation from the repository root:
 
 ```bash

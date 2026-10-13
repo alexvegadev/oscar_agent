@@ -1,4 +1,4 @@
-
+#This should be the base config.
 # Offline demo. Set provider = "openai_compatible" with --features http for real inference.
 work_mode = "mixed"
 

@@ -128,6 +128,9 @@ integration is implied by the library registry. The release audit remains requir
 
 ### Gate E — Planning and memory
 
+- [x] Opt-in Rig RAG for interactive agent sessions: explicitly loaded files,
+  local embeddings, bounded cited evidence and reset without resetting budgets.
+  Persistent vector storage and plan/run retrieval remain separate.
 - [x] Hybrid proposal slice: validated task DAG, canonical JSON/Markdown plans,
   local-first provider routing, bounded inference/escalation and artifact reports.
   This does not complete tool execution, plan revision or session memory gates.

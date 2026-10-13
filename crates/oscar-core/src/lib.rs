@@ -4,5 +4,7 @@ pub mod error;
 pub mod execution;
 pub mod planning;
 pub mod providers;
+#[cfg(feature = "rag")]
+pub mod rag;
 pub mod routing;
 pub mod tools;
