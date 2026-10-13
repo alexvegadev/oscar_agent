@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "outcome": "completed",
+  "provider": "local",
+  "reason": "strict local mode",
+  "call_started": true,
+  "simulation": false,
+  "input_bytes": 2645,
+  "usage": {
+    "input": 655,
+    "output": 2777
+  },
+  "elapsed_ms": 21552,
+  "error": null
+}

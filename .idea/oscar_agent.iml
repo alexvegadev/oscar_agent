@@ -7,6 +7,8 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/oscar-cli/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/oscar-core/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/oscar-core/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/oscar-code/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/oscar-code/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

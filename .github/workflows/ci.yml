@@ -27,7 +27,8 @@ jobs:
       - name: Install stable quality tools
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - run: cargo +stable fmt --all --check
-      - run: cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo +stable clippy --workspace --exclude oscar-code --all-targets --all-features --locked -- -D warnings
+      - run: cargo +stable clippy -p oscar-code --all-targets --features http --locked -- -D warnings
 
   tests:
     name: Tests (${{ matrix.os }}, Rust ${{ matrix.toolchain }})
@@ -47,4 +48,19 @@ jobs:
       - name: Default features
         run: cargo +${{ matrix.toolchain }} test --workspace --locked
       - name: All features
-        run: cargo +${{ matrix.toolchain }} test --workspace --all-features --locked
+        run: cargo +${{ matrix.toolchain }} test --workspace --exclude oscar-code --all-features --locked
+      - name: Desktop session library with HTTP
+        run: cargo +${{ matrix.toolchain }} test -p oscar-code --features http --locked
+
+  desktop:
+    name: GPUI desktop (Windows stable)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install stable desktop tools
+        run: rustup toolchain install stable --profile minimal --component clippy
+      - run: cargo +stable clippy -p oscar-code --all-targets --all-features --locked -- -D warnings
+      - run: cargo +stable test -p oscar-code --all-features --locked

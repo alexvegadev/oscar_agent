@@ -118,6 +118,9 @@ integration is implied by the library registry. The release audit remains requir
 
 ### Gate D — End-to-end agent
 
+- [x] Feature-gated GPUI desktop proposal chat uses bounded existing inference,
+  in-memory history, Markdown, cancellation/reset and non-secret preferences.
+  Native streaming, model-initiated tools and approval UI remain separate.
 - [x] Interactive CLI proposal session supports explicit workspace file reads,
   follow-up context, bounded inference and reset without resetting budgets.
   Model-initiated tools, applying edits and the autonomous loop remain separate.

@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "goal": "Design a CSV importer with duplicate detection and tests",
+  "work_mode": "local",
+  "tasks": [
+    {
+      "id": "T01",
+      "title": "Analyze requirements and identify missing evidence",
+      "description": "Analyze the goal to identify specific requirements for the CSV importer. Identify missing evidence: 1. Expected CSV schema (headers, data types). 2. Duplicate detection criteria (e.g., exact row match, unique ID column, or fuzzy match). 3. Error handling requirements (e.g., skip row, stop execution). Acceptance criteria: A requirements specification document listing identified requirements and missing evidence.",
+      "kind": "explore",
+      "difficulty": "low",
+      "risk": "low",
+      "preferred_provider": "local",
+      "dependencies": [],
+      "required_capabilities": [
+        "planning"
+      ],
+      "context_requirements": [
+        "User-supplied evidence"
+      ],
+      "expected_outputs": [
+        "Requirements specification",
+        "Missing evidence list"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": false,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "strict local mode",
+      "local_only_data": true
+    },
+    {
+      "id": "T02",
+      "title": "Design data structures and duplicate detection logic",
+      "description": "Design the internal data structures for representing CSV records and the algorithm for duplicate detection (e.g., using a hash set of unique keys or full row hashes). Acceptance criteria: A design proposal for data models and the duplicate detection algorithm.",
+      "kind": "reason",
+      "difficulty": "medium",
+      "risk": "low",
+      "preferred_provider": "local",
+      "dependencies": [
+        "T01"
+      ],
+      "required_capabilities": [
+        "advanced_reasoning"
+      ],
+      "context_requirements": [
+        "Requirements specification"
+      ],
+      "expected_outputs": [
+        "Design proposal"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": false,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "strict local mode",
+      "local_only_data": true
+    },
+    {
+      "id": "T03",
+      "title": "Implement CSV importer with duplicate detection",
+      "description": "Implement the core CSV importer module. It must parse CSV files, handle headers, and identify duplicates based on the design in T02. Acceptance criteria: Functional code that parses CSVs and returns a list of unique records and a list of detected duplicates.",
+      "kind": "implement",
+      "difficulty": "medium",
+      "risk": "medium",
+      "preferred_provider": "local",
+      "dependencies": [
+        "T02"
+      ],
+      "required_capabilities": [
+        "code_generation",
+        "code_analysis"
+      ],
+      "context_requirements": [
+        "Design proposal"
+      ],
+      "expected_outputs": [
+        "Importer implementation"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": false,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "strict local mode",
+      "local_only_data": true
+    },
+    {
+      "id": "T04",
+      "title": "Develop unit tests for importer",
+      "description": "Create a comprehensive suite of unit tests covering: 1. Valid CSV files. 2. Files with no duplicates. 3. Files with various duplicate types. 4. Malformed CSV rows. 5. Empty files. Acceptance criteria: All unit tests pass successfully.",
+      "kind": "test",
+      "difficulty": "medium",
+      "risk": "low",
+      "preferred_provider": "local",
+      "dependencies": [
+        "T03"
+      ],
+      "required_capabilities": [
+        "testing"
+      ],
+      "context_requirements": [
+        "Importer implementation"
+      ],
+      "expected_outputs": [
+        "Test suite",
+        "Test results"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": false,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "strict local mode",
+      "local_only_data": true
+    },
+    {
+      "id": "T05",
+      "title": "Document the importer and its usage",
+      "description": "Create documentation including: 1. Installation/Setup instructions. 2. API reference for the importer class/functions. 3. Usage examples for different duplicate detection modes. Acceptance criteria: A complete README or documentation file.",
+      "kind": "document",
+      "difficulty": "low",
+      "risk": "low",
+      "preferred_provider": "local",
+      "dependencies": [
+        "T03"
+      ],
+      "required_capabilities": [
+        "documentation"
+      ],
+      "context_requirements": [
+        "Importer implementation"
+      ],
+      "expected_outputs": [
+        "Documentation file"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": false,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "strict local mode",
+      "local_only_data": true
+    },
+    {
+      "id": "T06",
+      "title": "Review implementation and tests",
+      "description": "Perform a final review of the importer code, the duplicate detection logic, and the test coverage to ensure they meet the requirements defined in T01. Acceptance criteria: A review report confirming the implementation is complete and correct.",
+      "kind": "review",
+      "difficulty": "low",
+      "risk": "low",
+      "preferred_provider": "local",
+      "dependencies": [
+        "T03",
+        "T04",
+        "T05"
+      ],
+      "required_capabilities": [
+        "review",
+        "code_analysis"
+      ],
+      "context_requirements": [
+        "Importer implementation",
+        "Test results",
+        "Documentation file"
+      ],
+      "expected_outputs": [
+        "Review report"
+      ],
+      "validation": {
+        "kind": "non_empty"
+      },
+      "escalation_policy": {
+        "allow_remote": false,
+        "max_local_attempts": 2
+      },
+      "context_strategy": "distilled",
+      "reason": "strict local mode",
+      "local_only_data": true
+    }
+  ]
+}

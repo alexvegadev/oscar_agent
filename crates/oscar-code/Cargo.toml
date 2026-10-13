@@ -1,0 +1,32 @@
+[package]
+name = "oscar-code"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Blazing fast UI like OpenCode, ChatGPT, built with GPUI(gpui-kit)."
+
+[dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.9", optional = true }
+gpui-kit = { version = "=0.7.3", optional = true }
+oscar-core = { path = "../oscar-core" }
+serde = { version = "1", features = ["derive"] }
+toml = "1.1.8"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+# ICU 2.0 in the desktop dependency graph needs writeable's allocating Display macro.
+writeable = { version = "0.6", features = ["alloc"], optional = true }
+
+[features]
+default = []
+desktop = ["dep:gpui", "dep:gpui-kit", "dep:writeable"]
+http = ["oscar-core/http"]
+ui-tests = ["desktop", "gpui/test-support", "gpui-kit/test-support"]
+
+[[bin]]
+name = "oscar-code"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[lints]
+workspace = true

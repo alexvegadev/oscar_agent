@@ -11,6 +11,12 @@ Interactive coding proposals are available with `cargo run -p oscar-cli -- agent
 follow up in the same conversation. The example configuration uses mock replies.
 See [agent mode](docs/agent-mode.md) for real-provider setup, commands and limits.
 
+An experimental GPUI desktop proposal chat is available with
+`cargo +stable run -p oscar-code --features desktop`. It supports Markdown,
+multiline input, cancellation, reset and non-secret preferences. See
+[OSCAR Code](docs/oscar-code.md) for setup and implementation-plan status.
+Native token streaming and model-initiated tools remain future work.
+
 Opt-in [RAG with Rig](docs/rag.md) retrieves cited chunks from explicitly loaded
 files using local Ollama embeddings:
 
@@ -262,7 +268,7 @@ must finish before release; it does not block this incremental boundary work.
 - [x] Align Apache-2.0 license metadata and add contribution, conduct, and security policies.
 - [x] Add Linux/Windows CI for stable and Rust 1.85.0; verify the MSRV locally.
 - [x] Confirm the first hosted CI matrix run after publishing the workflow.
-- [ ] Review dependency licensing and public API compatibility.
+- [x] Review dependency licensing and public API compatibility.
 
 ### Safe repository tools and end-to-end changes
 
