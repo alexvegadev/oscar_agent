@@ -72,6 +72,169 @@ async fn drive(
     (report, events)
 }
 
+struct PausedNativeStream {
+    release: Arc<Notify>,
+    bytes: usize,
+}
+impl ModelProvider for PausedNativeStream {
+    fn native_tool_protocol(&self) -> bool {
+        true
+    }
+    fn infer(&self, _: ModelRequest) -> ModelFuture<'_> {
+        panic!("autonomous runs must use the streaming provider path")
+    }
+    fn infer_stream<'a>(
+        &'a self,
+        _: ModelRequest,
+        sink: &'a mut oscar_core::providers::ModelTextSink<'_>,
+    ) -> ModelFuture<'a> {
+        Box::pin(async move {
+            sink(&"x".repeat(self.bytes))?;
+            self.release.notified().await;
+            Ok(output("final answer"))
+        })
+    }
+}
+
+#[tokio::test]
+async fn autonomous_native_preview_arrives_before_completion_and_is_discarded_on_cancel() {
+    for cancel in [false, true] {
+        let config = test_config();
+        let mut session = test_session(&config);
+        let run = session
+            .begin_agent(
+                "stream",
+                &config,
+                starter_registry().unwrap(),
+                starter_policy(),
+            )
+            .unwrap();
+        let id = run.id();
+        let release = Arc::new(Notify::new());
+        let provider = Arc::new(PausedNativeStream {
+            release: release.clone(),
+            bytes: 5,
+        });
+        let (tx, mut events) = mpsc::channel(EVENT_CAPACITY);
+        let (preview_tx, mut previews) = tokio::sync::watch::channel((0, String::new()));
+        let worker = tokio::spawn(async move {
+            run.execute_stream(provider, tx, &mut |turn, text| {
+                preview_tx.send_replace((turn, text.to_owned()));
+                Ok(())
+            })
+            .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), previews.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        let (turn, text) = previews.borrow_and_update().clone();
+        assert_eq!(turn, 1);
+        assert_eq!(text, "xxxxx");
+        assert!(!worker.is_finished());
+        session.preview(id, text);
+        assert_eq!(session.preview, "xxxxx");
+        assert!(
+            !session
+                .messages()
+                .iter()
+                .any(|m| matches!(m, Message::Model(_)))
+        );
+        if cancel {
+            session.stop();
+        } else {
+            release.notify_one();
+        }
+        while let Some(event) = events.recv().await {
+            session.apply_runtime_event(event);
+        }
+        let report = worker.await.unwrap();
+        session.finish_agent(report.clone());
+        assert!(session.preview.is_empty());
+        assert_eq!(
+            report.state,
+            if cancel {
+                RunState::Cancelled
+            } else {
+                RunState::Completed
+            }
+        );
+        assert_eq!(
+            session
+                .messages()
+                .iter()
+                .any(|m| matches!(m, Message::Model(_))),
+            !cancel
+        );
+    }
+}
+
+#[tokio::test]
+async fn autonomous_native_stream_enforces_limits_before_delivering_preview() {
+    let config = test_config();
+    let mut session = test_session(&config);
+    let run = session
+        .begin_agent(
+            "stream",
+            &config,
+            starter_registry().unwrap(),
+            starter_policy(),
+        )
+        .unwrap();
+    let provider = Arc::new(PausedNativeStream {
+        release: Arc::new(Notify::new()),
+        bytes: config.limits.max_output_bytes + 1,
+    });
+    let (tx, mut rx) = mpsc::channel(EVENT_CAPACITY);
+    let worker = tokio::spawn(async move {
+        run.execute_stream(provider, tx, &mut |_, _| {
+            panic!("over-limit preview must not be delivered")
+        })
+        .await
+    });
+    while rx.recv().await.is_some() {}
+    assert_eq!(worker.await.unwrap().state, RunState::LimitReached);
+}
+
+#[tokio::test]
+async fn autonomous_previews_are_keyed_by_turn_and_never_deliver_tool_arguments() {
+    let config = test_config();
+    let mut session = test_session(&config);
+    let run = session
+        .begin_agent(
+            "inspect",
+            &config,
+            starter_registry().unwrap(),
+            starter_policy(),
+        )
+        .unwrap();
+    let provider = native_provider(vec![native_call(
+        "a",
+        r#"{"text":"PRIVATE_TOOL_ARGUMENT"}"#,
+    )]);
+    let (tx, mut rx) = mpsc::channel(EVENT_CAPACITY);
+    let worker = tokio::spawn(async move {
+        let mut previews = Vec::new();
+        let report = run
+            .execute_stream(provider, tx, &mut |turn, text| {
+                previews.push((turn, text.to_owned()));
+                Ok(())
+            })
+            .await;
+        (report, previews)
+    });
+    while let Some(event) = rx.recv().await {
+        session.apply_runtime_event(event);
+    }
+    let (report, previews) = worker.await.unwrap();
+    assert_eq!(report.state, RunState::Completed);
+    assert_eq!(report.tool_calls, 1);
+    assert_eq!(
+        previews,
+        vec![(1, "Inspecting text".into()), (2, "# Native answer".into())]
+    );
+}
+
 struct ObserveContext(Mutex<Vec<String>>);
 impl ModelProvider for ObserveContext {
     fn infer(&self, request: ModelRequest) -> ModelFuture<'_> {

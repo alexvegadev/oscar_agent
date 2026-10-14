@@ -229,13 +229,20 @@ impl Decoder {
             if self.finished || choice.index != 0 {
                 return Err(invalid("unexpected inference choice"));
             }
-            if (choice.delta.tool_calls.is_some() && !self.tools_enabled)
+            // Compatible servers may serialize an empty array on ordinary text
+            // chunks. Only a nonempty array proposes an action.
+            if (choice
+                .delta
+                .tool_calls
+                .as_ref()
+                .is_some_and(|calls| !calls.is_empty())
+                && !self.tools_enabled)
                 || choice.delta.function_call.is_some()
             {
                 return Err(invalid("tool calls are not supported by proposal workers"));
             }
             if let Some(calls) = choice.delta.tool_calls {
-                if calls.is_empty() || calls.len() > 32 {
+                if calls.len() > 32 {
                     return Err(invalid("invalid streamed tool call count"));
                 }
                 let mut indices = std::collections::BTreeSet::new();
@@ -457,7 +464,7 @@ mod tests {
     #[test]
     fn failures_never_deliver_invalid_event_text_or_complete_truncation() {
         for payload in [
-            r#"{"choices":[{"index":0,"delta":{"content":"secret","tool_calls":[]}}]}"#,
+            r#"{"choices":[{"index":0,"delta":{"content":"secret","tool_calls":[{"index":0,"id":"call","type":"function","function":{"name":"shell","arguments":"{}"}}]}}]}"#,
             r#"{"choices":[{"index":0,"delta":{"content":"secret","function_call":{}}}]}"#,
             r#"{"choices":[{"index":1,"delta":{"content":"secret"}}]}"#,
             r#"{"choices":[{"index":0,"delta":{"content":"secret"},"finish_reason":"tool_calls"}]}"#,

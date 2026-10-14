@@ -28,6 +28,10 @@ Streamable HTTP capabilities through the common registry. Build with `mcp`,
 configure explicit server/tool allowlists, and use `oscar mcp list` / `mcp check`
 to inspect registration. Desktop autonomous sessions can use read-only MCP tools.
 
+[Rig-backed providers](docs/providers.md#provider-selection) share the completion
+boundary with RAG. Select named compatible endpoints or configure a custom vendor
+with `protocol = "openai_chat"` in TOML; see [the example](examples/rig-providers.toml).
+
 Opt-in [RAG with Rig](docs/rag.md) retrieves cited chunks from explicitly loaded
 files using local Ollama embeddings:
 
@@ -49,7 +53,7 @@ configured separately. `/reset` discards the in-memory index and conversation.
 
 ## Quick start
 
-The workspace uses **Rust edition 2024** and declares **MSRV 1.85**. Run these commands from the repository root.
+The workspace uses **Rust edition 2024** and declares **MSRV 1.88**. Run these commands from the repository root.
 
 The supplied [example configuration](settings.toml) uses offline mock providers. No API keys, local model server, or cloud tokens are required:
 
@@ -274,11 +278,13 @@ must finish before release; it does not block this incremental boundary work.
 - [x] Cancellation, deadlines, remote budgets, and usage reports.
 - [x] CLI plan/run workflow and deterministic boundary tests.
 
+- [x] Add Rig-backed completion clients and configurable compatible providers.
+
 ### Foundation and release policies
 
 - [x] Align Apache-2.0 license metadata and add contribution, conduct, and security policies.
-- [x] Add Linux/Windows CI for stable and Rust 1.85.0; verify the MSRV locally.
-- [x] Confirm the first hosted CI matrix run after publishing the workflow.
+- [x] Add Linux/Windows CI for stable and Rust 1.88.0; verify the MSRV locally.
+- [ ] Confirm the hosted Rust 1.88 CI matrix after publishing the updated workflow.
 - [x] Review dependency licensing and public API compatibility.
 
 ### Safe repository tools and end-to-end changes
@@ -341,7 +347,7 @@ proposed TOML, Laya usage requirements, compatibility boundaries, and acceptance
 
 - [x] Register opt-in MCP stdio/Streamable HTTP tools through common validation and
   permissions for supported scalar schemas; other MCP capabilities remain separate.
-- [x] Native OpenAI-compatible SSE streaming, bounded CLI/desktop previews and offline conformance tests.
+- [x] Native OpenAI-compatible SSE streaming, bounded CLI/desktop proposal and autonomous previews, and offline conformance tests.
 - [ ] Expand prompt-injection, credential, filesystem, and resource-limit testing.
 - [ ] Add rate scheduling, resumable execution, and telemetry only with explicit bounds and privacy controls.
 
@@ -363,10 +369,10 @@ cargo test --workspace
 ```
 
 The [CI workflow](.github/workflows/ci.yml) checks formatting and Clippy, plus
-default/all-feature tests on Linux and Windows with stable and Rust 1.85.0.
+default/all-feature tests on Linux and Windows with stable and Rust 1.88.0.
 Builds use the committed lockfile (`--locked`). See [CONTRIBUTING.md](CONTRIBUTING.md)
-for toolchain setup and the matching local commands. The Rust 1.85.0 all-feature
-suite has passed locally on Windows; hosted Linux/Windows CI still needs its first run.
+for toolchain setup and the matching local commands. The Rust 1.88.0 core/CLI all-feature
+suite and headless desktop library have passed locally on Windows; hosted Linux/Windows CI still needs its first run.
 
 Tests use deterministic mocks and, with HTTP enabled, loopback fixtures. They do not require real API credentials or model downloads. The existing prototype command remains available:
 

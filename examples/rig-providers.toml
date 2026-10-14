@@ -1,0 +1,24 @@
+# cargo run -p oscar-cli --features http,rag -- agent --config examples/rig-providers.toml --workspace . --rag
+# Install the embedding model yourself; see docs/rag.md. Nothing is downloaded by OSCAR.
+work_mode = "mixed"
+
+[providers.local]
+enabled = true
+provider = "ollama"
+model = "your-installed-chat-model"
+context_window = 32768
+capabilities = ["planning", "code_analysis", "documentation", "tool_use"]
+
+[providers.remote]
+enabled = false
+provider = "openrouter"
+model = "your-provider/model-id"
+api_key_env = "OSCAR_REMOTE_API_KEY"
+context_window = 128000
+capabilities = ["planning", "code_analysis", "documentation", "tool_use"]
+
+# For any custom compatible vendor, change the remote fields to:
+# provider = "my-provider"
+# protocol = "openai_chat"
+# api_url = "https://models.example.com/v1/chat/completions"
+# Enabling remote does not grant permission to send repository context.

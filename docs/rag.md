@@ -86,6 +86,8 @@ the session enforces count, shape, finite nonzero vectors, stable dimensions,
 timeouts, cancellation, capacity and encoded evidence limits. Tests use mock
 vectors and loopback HTTP fixtures without credentials or model downloads.
 
-Rig is pinned to `rig-core = 0.11.1` with default features disabled, verified on
-Rust 1.85. Only its vector store and embedding contracts are used. Upgrading Rig
-requires an explicit MSRV/API/dependency review; see [ADR 0007](adr/0007-session-rag.md).
+Rig is pinned to `rig-core = 0.32.0` with default features disabled, using the
+workspace's Rust 1.88 minimum. Completion providers and retrieval now share this
+Rig version. Embeddings remain a separate, bounded loopback-only model; changing a
+completion provider does not change embedding locality or grant remote data access.
+See [provider configuration](providers.md) and [ADR 0014](adr/0014-rig-providers.md).

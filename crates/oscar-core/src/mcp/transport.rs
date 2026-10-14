@@ -283,17 +283,17 @@ impl Http {
         if !wire.status().is_success() {
             return Err(transport());
         }
-        if id == 1 {
-            if let Some(session) = wire.headers().get("MCP-Session-Id") {
-                let session = session.to_str().map_err(|_| protocol())?;
-                if session.is_empty()
-                    || session.len() > 256
-                    || !session.bytes().all(|b| (0x21..=0x7e).contains(&b))
-                {
-                    return Err(protocol());
-                }
-                self.session = Some(session.into());
+        if id == 1
+            && let Some(session) = wire.headers().get("MCP-Session-Id")
+        {
+            let session = session.to_str().map_err(|_| protocol())?;
+            if session.is_empty()
+                || session.len() > 256
+                || !session.bytes().all(|b| (0x21..=0x7e).contains(&b))
+            {
+                return Err(protocol());
             }
+            self.session = Some(session.into());
         }
         let content_type = wire
             .headers()

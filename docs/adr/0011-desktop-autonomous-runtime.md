@@ -41,7 +41,10 @@ events before applying the authoritative report. A best-effort terminal event
 never blocks shutdown; the report is the fallback terminal authority. Guard UI
 insertion by run ID, active state and increasing event sequence. Retain only
 bounded redacted event metadata; display typed tool data through bounded history.
-Buffer autonomous protocol replies until validated, retaining native streaming
+Buffer legacy autonomous JSON protocol replies until validated. Native tool
+providers now expose bounded, per-turn provisional text previews through a
+nonblocking sink and one latest watch snapshot; typed calls still wait for complete
+validation. Preserve ordered lifecycle/tool events independently, retaining native streaming
 for proposal mode.
 
 ## Alternatives

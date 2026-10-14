@@ -61,7 +61,9 @@ For complex local-only requests configure a local provider that actually support
 that capability; OSCAR will not pretend a capability exists to make a plan work.
 Capabilities are operator assertions, independent of model names.
 
-For real inference build with `--features http` and replace the provider entries:
+For Rig-backed inference build with `--features http` and replace the provider entries.
+See [provider configuration](providers.md#provider-selection) for named endpoints and
+custom providers selected entirely through TOML:
 
 ```toml
 [providers.local]
@@ -193,7 +195,7 @@ Run `cargo fmt --all --check`,
 `cargo test --workspace --all-features`. Default-feature tests exercise the
 credential-free build. HTTP adapter behavior is fixture-tested, not live-provider
 certified. The locked workspace has also been tested with the dedicated Rust
-1.85.0 Windows toolchain. CI covers stable and 1.85.0 on Windows and Linux;
+1.88.0 Windows toolchain. CI covers stable and 1.88.0 on Windows and Linux;
 the first hosted matrix run is still pending. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 Next: implement the registered read-only repository tool boundary, attach compiler/

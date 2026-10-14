@@ -95,12 +95,14 @@ Work should follow the sequence in `README.md`. Reorder only when dependencies o
 ### Gate A — Foundation
 
 - [x] Workspace, Apache-2.0 license, contribution/security policies, and CI workflow exist.
-- [x] Edition/MSRV and formatting/linting policy are declared; Rust 1.85.0 is verified locally.
+- [x] Edition/MSRV and formatting/linting policy are declared; Rust 1.88.0 is verified locally.
 - [x] First use case and architecture decisions are recorded.
 - [ ] First hosted Linux/Windows CI matrix run passes after the workflow is published.
 
 ### Gate B — Model boundary
 
+- [x] Rig-backed compatible completion clients and custom provider names selected
+  through an explicit protocol in TOML, with bounded transport and Rust 1.88 support.
 - [ ] Provider-neutral types and async trait exist.
 - [ ] Mock provider enables deterministic tests.
 - [ ] At least one real adapter supports secure configuration, timeout, and cancellation behavior.
@@ -120,7 +122,7 @@ integration is implied by the library registry. The release audit remains requir
 
 - [x] Feature-gated GPUI desktop proposal chat uses bounded existing inference,
   in-memory history, Markdown, cancellation/reset and non-secret preferences.
-  Native provider streaming and host-supplied typed tool messages with bounded
+  Native provider streaming in proposal/autonomous modes and typed tool messages with bounded
   nested JSON rendering are implemented. Opt-in autonomous read-only registry
   execution and live runtime events are implemented; approval UI remains separate.
 - [x] Interactive CLI proposal session supports explicit workspace file reads,

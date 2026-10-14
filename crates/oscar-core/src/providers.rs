@@ -261,9 +261,31 @@ fn build_provider(
     name: &str,
     config: &Config,
 ) -> Result<Arc<dyn ModelProvider>, OscarError> {
+    if let Some(protocol) = &p.protocol {
+        if protocol != "openai_chat" || p.provider.as_deref() == Some("mock") {
+            return Err(OscarError::Config(
+                "protocol must be openai_chat for a non-mock provider".into(),
+            ));
+        }
+        #[cfg(feature = "http")]
+        {
+            return Ok(Arc::new(http::HttpProvider::new(
+                p,
+                name == "local",
+                config.limits.call_timeout_ms,
+            )?));
+        }
+        #[cfg(not(feature = "http"))]
+        {
+            let _ = (name, config);
+            return Err(OscarError::Config(
+                "Rig providers require the http Cargo feature".into(),
+            ));
+        }
+    }
     match p.provider.as_deref() {
         Some("mock") => Ok(Arc::new(MockProvider::demo())),
-        Some("openai_compatible") => {
+        Some("openai_compatible" | "openai" | "openrouter" | "groq" | "deepseek" | "xai" | "ollama" | "lmstudio") => {
             #[cfg(feature = "http")]
             {
                 Ok(Arc::new(http::HttpProvider::new(
@@ -276,12 +298,12 @@ fn build_provider(
             {
                 let _ = (name, config);
                 Err(OscarError::Config(
-                    "openai_compatible requires the http Cargo feature".into(),
+                    "Rig providers require the http Cargo feature".into(),
                 ))
             }
         }
         _ => Err(OscarError::Config(
-            "provider must be mock or openai_compatible".into(),
+            "unsupported provider; use mock, openai_compatible, openai, openrouter, groq, deepseek, xai, ollama or lmstudio".into(),
         )),
     }
 }

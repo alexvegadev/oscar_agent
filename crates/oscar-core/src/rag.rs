@@ -4,7 +4,7 @@ use crate::{error::OscarError, execution::CancellationToken};
 use rig::{
     OneOrMany,
     embeddings::{Embedding, EmbeddingError, EmbeddingModel},
-    vector_store::{VectorStoreIndex, in_memory_store::InMemoryVectorStore},
+    vector_store::{VectorSearchRequest, VectorStoreIndex, in_memory_store::InMemoryVectorStore},
 };
 use serde::{Deserialize, Serialize};
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
@@ -256,7 +256,13 @@ impl RagSession {
         // No Rig agent, provider HTTP client or tool execution path is used.
         let index = self.store.clone().index(QueryEmbedding(embedding));
         let mut hits = index
-            .top_n::<Evidence>(query, self.limits.top_k)
+            .top_n::<Evidence>(
+                VectorSearchRequest::builder()
+                    .query(query)
+                    .samples(self.limits.top_k as u64)
+                    .build()
+                    .map_err(|_| OscarError::Validation("invalid RAG search request".into()))?,
+            )
             .await
             .map_err(|_| OscarError::Validation("RAG vector search failed".into()))?;
         hits.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
@@ -282,6 +288,10 @@ impl RagSession {
 struct QueryEmbedding(Embedding);
 impl EmbeddingModel for QueryEmbedding {
     const MAX_DOCUMENTS: usize = 1;
+    type Client = Embedding;
+    fn make(client: &Self::Client, _: impl Into<String>, _: Option<usize>) -> Self {
+        Self(client.clone())
+    }
     fn ndims(&self) -> usize {
         self.0.vec.len()
     }

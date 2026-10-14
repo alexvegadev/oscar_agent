@@ -78,6 +78,9 @@ pub struct Features {
 pub struct Provider {
     pub enabled: bool,
     pub provider: Option<String>,
+    /// Explicit protocol for custom provider names. Currently `openai_chat`.
+    /// A vendor name alone cannot add a new wire format or permissions.
+    pub protocol: Option<String>,
     pub model: String,
     pub context_window: u32,
     pub capabilities: Vec<Capability>,

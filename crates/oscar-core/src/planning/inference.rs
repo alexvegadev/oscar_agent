@@ -328,10 +328,10 @@ fn validate_review(plan: &Plan, config: &Config) -> Result<(), OscarError> {
         let mut ancestors = BTreeSet::new();
         let mut pending = review.dependencies.clone();
         while let Some(id) = pending.pop() {
-            if ancestors.insert(id.clone()) {
-                if let Some(task) = plan.tasks.iter().find(|t| t.id == id) {
-                    pending.extend(task.dependencies.iter().cloned());
-                }
+            if ancestors.insert(id.clone())
+                && let Some(task) = plan.tasks.iter().find(|t| t.id == id)
+            {
+                pending.extend(task.dependencies.iter().cloned());
             }
         }
         if ancestors.len() + 1 == plan.tasks.len() {

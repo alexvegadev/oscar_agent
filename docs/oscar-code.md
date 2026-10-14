@@ -12,7 +12,7 @@ cargo +stable run -p oscar-code --features desktop,http -- --config settings.tom
 
 The desktop feature uses GPUI Kit 0.7.3 and its matching `gpui-pre` 0.3.9 engine.
 Use current stable Rust for desktop builds (locally checked with 1.98.1). The
-headless session library retains the workspace's Rust 1.85 support. Desktop
+headless session library retains the workspace's Rust 1.88 support. Desktop
 dependencies and native platform prerequisites are isolated behind `desktop`;
 Windows is the initial verified build target. Linux/macOS desktop builds and
 visual review on a native display have not been verified.
@@ -191,8 +191,12 @@ to include only user/model text. Tool results cannot grant permissions or add to
 
 Core adapters remain inference-only: decoding calls grants no execution permission.
 CLI proposals, planner inference, artifact workers and desktop proposal mode send
-no tool definitions and reject typed tool outputs. Autonomous replies are buffered
-until validated; proposal mode retains native text streaming. Live-provider
+no tool definitions and reject typed tool outputs. Native autonomous responses show
+bounded provisional text as it arrives, using a single latest snapshot per model
+turn. Model/tool events keep their ordered queue. Previews are cleared on each
+model boundary, Stop, Reset, failure or limit; only a validated final answer enters
+history. Legacy JSON-envelope providers remain buffered, so tool argument JSON is
+never rendered as answer text. Proposal mode also retains native text streaming. Live-provider
 compatibility and native visual/platform QA have not been evaluated.
 
 Every model request, including continuations, consumes the shared desktop turn
@@ -225,6 +229,9 @@ not enter a full queue. Reset clears content and event metadata, preserving budg
 
 The headless API is `SessionState::begin_agent(prompt, config, registry, policy)`
 with `Settings::autonomous = true`, then `AgentRun::execute(provider, sender)`.
+For live native text use `AgentRun::execute_stream(provider, sender, sink)`; its
+nonblocking sink receives `(turn, delta)` and must reset previews when the turn
+changes. Text remains provisional until the authoritative report succeeds.
 Drain the bounded receiver concurrently, apply events with
 `session.apply_runtime_event(event)`, and apply the returned report with
 `session.finish_agent(report)`. `runtime::starter_registry`, `starter_policy` and

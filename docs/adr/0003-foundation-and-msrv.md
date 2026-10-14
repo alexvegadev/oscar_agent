@@ -1,5 +1,7 @@
 # ADR 0003: Foundation policies and locked MSRV verification
 
+The compiler/Rig pin decisions below are superseded by [ADR 0014](0014-rig-providers.md).
+
 ## Status
 
 Accepted. The workflow is implemented; its first hosted matrix run is pending.

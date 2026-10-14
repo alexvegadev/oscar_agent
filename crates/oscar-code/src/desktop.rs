@@ -351,21 +351,54 @@ impl Chat {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.session.running(id);
         let (sender, mut receiver) = tokio::sync::mpsc::channel(EVENT_CAPACITY);
-        let handle = self.runtime.spawn(run.execute(provider, sender));
+        let (preview_sender, mut previews) = tokio::sync::watch::channel((0usize, String::new()));
+        let handle = self.runtime.spawn(async move {
+            let mut preview_turn = 0;
+            let mut text = String::new();
+            run.execute_stream(provider, sender, &mut |turn, delta| {
+                if turn != preview_turn {
+                    text.clear();
+                    preview_turn = turn;
+                }
+                text.push_str(delta);
+                preview_sender.send_replace((turn, text.clone()));
+                Ok(())
+            })
+            .await
+        });
         self.task = Some(cx.spawn(async move |this, cx| {
-            // Drain every event in order before applying the authoritative report.
-            // This avoids dropping queued tool messages when inference finishes first.
-            while let Some(event) = receiver.recv().await {
-                if this
-                    .update(cx, |this, cx| {
-                        this.session.apply_runtime_event(event);
-                        this.scroll.scroll_to_bottom();
-                        cx.notify();
-                    })
-                    .is_err()
-                {
-                    handle.abort();
-                    return;
+            let mut active_turn = None;
+            let mut previews_open = true;
+            // Keep lifecycle/tool events ordered while coalescing token updates
+            // into one bounded snapshot. Never await rendering in the model sink.
+            loop {
+                tokio::select! {
+                    biased;
+                    event = receiver.recv() => {
+                        let Some(event) = event else { break; };
+                        match &event.kind {
+                            runtime::RuntimeEventKind::ModelStarted { turn } => active_turn = Some(*turn),
+                            runtime::RuntimeEventKind::ModelFinished { .. } | runtime::RuntimeEventKind::Finished(_) => active_turn = None,
+                            _ => {},
+                        }
+                        if this.update(cx, |this, cx| {
+                            if matches!(event.kind, runtime::RuntimeEventKind::ModelStarted { .. } | runtime::RuntimeEventKind::ModelFinished { .. }) {
+                                this.session.preview.clear();
+                            }
+                            this.session.apply_runtime_event(event);
+                            this.scroll.scroll_to_bottom();
+                            cx.notify();
+                        }).is_err() { handle.abort(); return; }
+                    }
+                    changed = previews.changed(), if previews_open => {
+                        if changed.is_err() { previews_open = false; continue; }
+                        let (turn, text) = previews.borrow_and_update().clone();
+                        if active_turn == Some(turn) && this.update(cx, |this, cx| {
+                            this.session.preview(id, text);
+                            this.scroll.scroll_to_bottom();
+                            cx.notify();
+                        }).is_err() { handle.abort(); return; }
+                    }
                 }
             }
             let report = handle.await;
@@ -615,6 +648,115 @@ mod tests {
         settings::Settings,
     };
     use gpui::{AppContext, Bounds, TestAppContext, WindowBounds, WindowOptions, px, size};
+    use std::sync::Arc;
+
+    struct PausedNative(Arc<tokio::sync::Notify>);
+    impl oscar_core::providers::ModelProvider for PausedNative {
+        fn native_tool_protocol(&self) -> bool {
+            true
+        }
+        fn infer(
+            &self,
+            _: oscar_core::providers::ModelRequest,
+        ) -> oscar_core::providers::ModelFuture<'_> {
+            panic!("desktop autonomous inference must stream")
+        }
+        fn infer_stream<'a>(
+            &'a self,
+            _: oscar_core::providers::ModelRequest,
+            sink: &'a mut oscar_core::providers::ModelTextSink<'_>,
+        ) -> oscar_core::providers::ModelFuture<'a> {
+            Box::pin(async move {
+                sink("early preview")?;
+                self.0.notified().await;
+                Ok(oscar_core::providers::ModelOutput {
+                    content: "final answer".into(),
+                    tool_calls: Vec::new(),
+                    confidence: oscar_core::planning::Confidence::High,
+                    usage: Default::default(),
+                })
+            })
+        }
+    }
+
+    #[gpui::test]
+    async fn autonomous_native_text_renders_before_completion(cx: &mut TestAppContext) {
+        // This integration test bridges GPUI's scheduler and the real Tokio worker.
+        cx.executor().allow_parking();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let handle = runtime.handle().clone();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let provider = Arc::new(PausedNative(release.clone()));
+        let (window, chat) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            gpui_kit::open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                        None,
+                        size(px(1200.), px(900.)),
+                        cx,
+                    ))),
+                    ..Default::default()
+                },
+                cx,
+                |window, cx| {
+                    cx.new(|cx| {
+                        let mut chat = Chat::new(
+                            Config::parse(include_str!("../../../settings.toml")).unwrap(),
+                            Settings::default(),
+                            "unused-ui-test.toml".into(),
+                            handle,
+                            window,
+                            cx,
+                        )
+                        .unwrap();
+                        // Inject a provider without constructing any live network client.
+                        chat.config.providers.get_mut("local").unwrap().provider =
+                            Some("injected".into());
+                        chat.providers.local = Some(provider);
+                        chat
+                    })
+                },
+            )
+            .unwrap()
+        });
+        cx.update_window(window, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("settings", cx);
+            window.click("autonomous", cx);
+            chat.update(cx, |chat, cx| {
+                chat.input
+                    .update(cx, |input, cx| input.set_value("hello", window, cx))
+            });
+            window.click("submit", cx);
+        })
+        .unwrap();
+        cx.wait_for(window, std::time::Duration::from_secs(3), |_, cx| {
+            chat.read(cx).session.preview == "early preview"
+        })
+        .await;
+        cx.update_window(window, |_, window, cx| {
+            assert!(chat.read(cx).session.state.active());
+            assert_eq!(chat.read(cx).session.messages().len(), 1);
+            window.render_frame(cx);
+            assert_eq!(window.find(("message", 1usize)).label(), Some("OSCAR"));
+        })
+        .unwrap();
+        release.notify_one();
+        cx.wait_for(window, std::time::Duration::from_secs(3), |_, cx| {
+            chat.read(cx).session.state == RunState::Completed
+        })
+        .await;
+        cx.update_window(window, |_, _, cx| {
+            assert!(chat.read(cx).session.preview.is_empty());
+            assert!(matches!(chat.read(cx).session.messages().last(), Some(crate::messages::Message::Model(text)) if text == "final answer"));
+        }).unwrap();
+        runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+    }
     use gpui_kit::test::{TestAppContextExt, TestWindowExt};
     use oscar_core::config::Config;
     use oscar_core::tools::ToolError;

@@ -7,24 +7,27 @@ expectations. Report vulnerabilities using [SECURITY.md](SECURITY.md).
 
 ## Development setup
 
-Install Rust with rustup. The workspace uses edition 2024 and supports Rust 1.85.0
-or newer. Use current stable for formatting and linting; use 1.85.0 to check the
+Install Rust with rustup. The workspace uses edition 2024 and supports Rust 1.88.0
+or newer. Use current stable for formatting and linting; use 1.88.0 to check the
 minimum supported Rust version (MSRV). Keep the workspace edition and MSRV shared
 between crates. An MSRV increase needs an explicit compatibility decision and an
 update to the CI matrix and documentation.
 
 ```bash
 rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-rustup toolchain install 1.85.0 --profile minimal
+rustup toolchain install 1.88.0 --profile minimal
 cargo +stable fmt --all --check
 cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo +stable test --workspace --locked
 cargo +stable test --workspace --all-features --locked
-cargo +1.85.0 test --workspace --locked
-cargo +1.85.0 test --workspace --all-features --locked
+cargo +1.88.0 test --workspace --locked
+cargo +1.88.0 test --workspace --exclude oscar-code --all-features --locked
+cargo +1.88.0 test -p oscar-code --features http --locked
 ```
 
-The CI workflow runs tests on Linux and Windows with both toolchains. Default
+The CI workflow runs headless tests on Linux and Windows with both toolchains.
+GPUI desktop all-feature checks run on Windows stable; its platform dependencies
+have a separate compiler requirement. Default
 tests use mocks; HTTP-feature tests use loopback fixtures. Never add live model
 credentials, paid inference, or model downloads to the default suite.
 

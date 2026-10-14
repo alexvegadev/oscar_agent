@@ -28,6 +28,9 @@ use tokio::{sync::mpsc, time::Instant};
 pub const EVENT_CAPACITY: usize = 8;
 /// Maximum per-tool output; also constrained by the configured output limit.
 pub const TOOL_OUTPUT_BYTES: usize = 4096;
+/// Provisional text deltas keyed by model turn. Sinks must remain nonblocking.
+/// Tool arguments and legacy JSON envelopes are never delivered here.
+pub type RuntimeTextSink<'a> = dyn FnMut(usize, &str) -> Result<(), OscarError> + Send + 'a;
 
 #[derive(Default)]
 struct Counters {
@@ -247,19 +250,19 @@ fn check_provider(config: &Config, settings: &Settings, bytes: usize) -> Result<
     {
         return Err(OscarError::Limit("provider context bound exceeded".into()));
     }
-    if settings.provider == ProviderPreference::Remote {
-        if let Some(cap) = config.routing.max_remote_call_cost {
-            let Some(input) = provider.cost.input_per_million else {
-                return Err(OscarError::Limit("remote pricing required".into()));
-            };
-            let Some(output) = provider.cost.output_per_million else {
-                return Err(OscarError::Limit("remote pricing required".into()));
-            };
-            if (bytes as f64 * input + config.limits.max_output_tokens as f64 * output) / 1_000_000.
-                > cap
-            {
-                return Err(OscarError::Limit("remote cost bound exceeded".into()));
-            }
+    if settings.provider == ProviderPreference::Remote
+        && let Some(cap) = config.routing.max_remote_call_cost
+    {
+        let Some(input) = provider.cost.input_per_million else {
+            return Err(OscarError::Limit("remote pricing required".into()));
+        };
+        let Some(output) = provider.cost.output_per_million else {
+            return Err(OscarError::Limit("remote pricing required".into()));
+        };
+        if (bytes as f64 * input + config.limits.max_output_tokens as f64 * output) / 1_000_000.
+            > cap
+        {
+            return Err(OscarError::Limit("remote cost bound exceeded".into()));
         }
     }
     Ok(())
@@ -526,9 +529,21 @@ impl AgentRun {
     /// Execute while the caller drains the receiver. Queue waits share cancellation/deadline.
     /// Dropping the receiver aborts further work. The returned report is authoritative.
     pub async fn execute(
+        self,
+        provider: Arc<dyn ModelProvider>,
+        sender: mpsc::Sender<RuntimeEvent>,
+    ) -> RuntimeReport {
+        self.execute_stream(provider, sender, &mut |_, _| Ok(()))
+            .await
+    }
+
+    /// Deliver bounded native text as it arrives, separately from ordered events.
+    /// A new turn starts a new preview; only the final report commits an answer.
+    pub async fn execute_stream(
         mut self,
         provider: Arc<dyn ModelProvider>,
         sender: mpsc::Sender<RuntimeEvent>,
+        sink: &mut RuntimeTextSink<'_>,
     ) -> RuntimeReport {
         let deadline = Instant::now() + self.run.timeout;
         let cancellation = self.run.cancellation.clone();
@@ -536,7 +551,7 @@ impl AgentRun {
             biased;
             _ = cancellation.cancelled() => Err(RuntimeFailure::Cancelled),
             _ = sender.closed() => Err(RuntimeFailure::SubscriberClosed),
-            result = tokio::time::timeout_at(deadline, self.run_loop(provider, &sender, deadline)) => result.unwrap_or(Err(RuntimeFailure::Limit)),
+            result = tokio::time::timeout_at(deadline, self.run_loop(provider, &sender, deadline, sink)) => result.unwrap_or(Err(RuntimeFailure::Limit)),
         };
         let report = match result {
             Ok(output) => RuntimeReport {
@@ -587,6 +602,7 @@ impl AgentRun {
         provider: Arc<dyn ModelProvider>,
         sender: &mpsc::Sender<RuntimeEvent>,
         deadline: Instant,
+        sink: &mut RuntimeTextSink<'_>,
     ) -> Result<ModelOutput, RuntimeFailure> {
         self.emit(sender, RuntimeEventKind::Started).await?;
         // Clone the Arc so ToolSession's borrow doesn't borrow the loop's event state.
@@ -642,7 +658,25 @@ impl AgentRun {
                 .await?;
             let call_deadline = deadline
                 .min(Instant::now() + Duration::from_millis(self.config.limits.call_timeout_ms));
-            let output = tokio::time::timeout_at(call_deadline, provider.infer(request))
+            let limit = request.max_output_bytes;
+            let mut delivered = 0usize;
+            let mut bounded_sink = |delta: &str| {
+                delivered = delivered.saturating_add(delta.len());
+                if delivered > limit {
+                    return Err(OscarError::Limit("model output exceeds byte limit".into()));
+                }
+                sink(turn, delta)
+            };
+            let inference = async {
+                if provider.native_tool_protocol() {
+                    provider.infer_stream(request, &mut bounded_sink).await
+                } else {
+                    // Legacy replies are JSON envelopes; never show their raw
+                    // tool arguments or provisional instructions as answer text.
+                    provider.infer(request).await
+                }
+            };
+            let output = tokio::time::timeout_at(call_deadline, inference)
                 .await
                 .map_err(|_| RuntimeFailure::Limit)?
                 .map_err(model_error)?;

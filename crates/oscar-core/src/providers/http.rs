@@ -1,19 +1,32 @@
 use super::*;
+use futures_util::StreamExt;
 use reqwest::{Client, Url};
+use rig::{completion::CompletionModel, prelude::CompletionClient};
 use std::{net::IpAddr, time::Duration};
+use tracing::instrument::WithSubscriber;
+
+mod transport;
 
 pub(super) struct HttpProvider {
     client: Client,
     url: Url,
     model: String,
     key: Option<String>,
+    timeout_ms: u64,
 }
 impl HttpProvider {
     pub(super) fn new(p: &Provider, local: bool, timeout_ms: u64) -> Result<Self, OscarError> {
         let invalid = || {
             OscarError::Config("api_url must be a credential-free absolute chat/completions URL; local requires a loopback IP, remote requires HTTPS".into())
         };
-        let url = Url::parse(p.api_url.as_deref().ok_or_else(invalid)?).map_err(|_| invalid())?;
+        let endpoint = p
+            .api_url
+            .as_deref()
+            .or_else(|| default_endpoint(p.provider.as_deref()));
+        let url = Url::parse(endpoint.ok_or_else(invalid)?).map_err(|_| invalid())?;
+        if !url.path().ends_with("/chat/completions") || timeout_ms == 0 {
+            return Err(invalid());
+        }
         if !url.username().is_empty()
             || url.password().is_some()
             || url.query().is_some()
@@ -42,6 +55,7 @@ impl HttpProvider {
         let client = Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .timeout(Duration::from_millis(timeout_ms))
             .connect_timeout(Duration::from_millis(timeout_ms.min(10_000)))
             .build()
@@ -51,6 +65,7 @@ impl HttpProvider {
             url,
             model: p.model.clone(),
             key,
+            timeout_ms,
         })
     }
 }
@@ -68,52 +83,78 @@ impl ModelProvider for HttpProvider {
         sink: &'a mut ModelTextSink<'_>,
     ) -> ModelFuture<'a> {
         Box::pin(async move {
-            let mut call = self
-                .client
-                .post(self.url.clone())
-                .json(&super::chat::body(&self.model, &request)?)
-                .header(reqwest::header::ACCEPT, "text/event-stream");
-            if let Some(key) = &self.key {
-                call = call.bearer_auth(key);
-            }
-            let mut response = call.send().await.map_err(|e| OscarError::Provider {
-                transient: e.is_timeout() || e.is_connect(),
-                message: "HTTP transport error (details redacted)".into(),
-            })?;
-            if !response.status().is_success() {
-                return Err(OscarError::Provider {
-                    transient: response.status().as_u16() == 429
-                        || response.status().is_server_error(),
-                    message: format!("HTTP status {}", response.status().as_u16()),
-                });
-            }
-            if !response
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok())
-                .is_some_and(|v| {
-                    v.split(';')
-                        .next()
-                        .unwrap_or_default()
-                        .trim()
-                        .eq_ignore_ascii_case("text/event-stream")
-                })
-            {
-                return Err(stream::invalid("expected an SSE inference response"));
-            }
-            let mut decoder =
-                stream::Decoder::new(request.max_output_bytes, request.max_output_tokens);
-            decoder.enable_tools(!request.tools.is_empty());
-            while let Some(chunk) = response.chunk().await.map_err(|_| OscarError::Provider {
-                transient: true,
-                message: "response stream interrupted".into(),
-            })? {
-                if decoder.feed(&chunk, sink)? {
-                    return Ok(decoder.output());
+            let transport = transport::Transport {
+                client: Some(self.client.clone()),
+                url: Some(self.url.clone()),
+                max_bytes: request.max_output_bytes,
+                max_tokens: request.max_output_tokens,
+                tools: !request.tools.is_empty(),
+                ..Default::default()
+            };
+            let base = self
+                .url
+                .as_str()
+                .strip_suffix("/chat/completions")
+                .ok_or_else(|| OscarError::Config("invalid completion endpoint".into()))?;
+            let client = rig::providers::openai::CompletionsClient::builder()
+                .api_key(self.key.clone().unwrap_or_default())
+                .base_url(base)
+                .http_client(transport.clone())
+                .build()
+                .map_err(|_| {
+                    OscarError::Config("cannot initialize Rig client (details redacted)".into())
+                })?;
+            let model = client.completion_model(&self.model);
+            let rig_request = super::chat::rig_request(&request)?;
+            // Rig's trace spans can capture message content. Disable its subscriber
+            // only while polling this request, without changing the host subscriber.
+            let inference = async {
+                let mut response = model
+                    .stream(rig_request)
+                    .await
+                    .map_err(|_| stream::invalid("Rig request failed (details redacted)"))?;
+                while let Some(chunk) = response.next().await {
+                    match chunk {
+                        Ok(rig::streaming::StreamedAssistantContent::Text(text)) => {
+                            sink(&text.text)?
+                        }
+                        Ok(_) => {}
+                        Err(_) => {
+                            return Err(stream::invalid("Rig stream failed (details redacted)"));
+                        }
+                    }
                 }
-            }
-            Err(stream::invalid("incomplete inference stream"))
+                transport
+                    .state
+                    .lock()
+                    .map_err(|_| stream::invalid("Rig transport state unavailable"))?
+                    .result
+                    .take()
+                    .ok_or_else(|| stream::invalid("incomplete inference stream"))?
+            };
+            tokio::time::timeout(
+                Duration::from_millis(self.timeout_ms),
+                inference.with_subscriber(tracing::subscriber::NoSubscriber::default()),
+            )
+            .await
+            .map_err(|_| OscarError::Provider {
+                transient: true,
+                message: "inference deadline exceeded".into(),
+            })?
         })
+    }
+}
+
+pub(super) fn default_endpoint(provider: Option<&str>) -> Option<&'static str> {
+    match provider? {
+        "openai" => Some("https://api.openai.com/v1/chat/completions"),
+        "openrouter" => Some("https://openrouter.ai/api/v1/chat/completions"),
+        "groq" => Some("https://api.groq.com/openai/v1/chat/completions"),
+        "deepseek" => Some("https://api.deepseek.com/v1/chat/completions"),
+        "xai" => Some("https://api.x.ai/v1/chat/completions"),
+        "ollama" => Some("http://127.0.0.1:11434/v1/chat/completions"),
+        "lmstudio" => Some("http://127.0.0.1:1234/v1/chat/completions"),
+        _ => None,
     }
 }
 
@@ -164,6 +205,198 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn presets_use_the_same_endpoint_policy_and_unknown_protocols_fail() {
+        let example =
+            Config::parse(include_str!("../../../../examples/rig-providers.toml")).unwrap();
+        assert!(Providers::from_config(&example).is_ok());
+        for name in ["openai", "openrouter", "groq", "deepseek", "xai"] {
+            let mut p = provider("https://example.com/v1/chat/completions");
+            p.provider = Some(name.into());
+            p.api_url = None;
+            assert!(HttpProvider::new(&p, false, 100).is_ok());
+            assert!(HttpProvider::new(&p, true, 100).is_err());
+        }
+        for name in ["ollama", "lmstudio"] {
+            let mut p = provider("");
+            p.provider = Some(name.into());
+            p.api_url = None;
+            assert!(HttpProvider::new(&p, true, 100).is_ok());
+        }
+        let mut config = Config::parse(include_str!("../../../../settings.toml")).unwrap();
+        config.providers.get_mut("local").unwrap().provider = Some("unknown_protocol".into());
+        assert!(Providers::from_config(&config).is_err());
+        let p = config.providers.get_mut("local").unwrap();
+        p.protocol = Some("openai_chat".into());
+        p.api_url = Some("http://127.0.0.1:1234/v1/chat/completions".into());
+        assert!(Providers::from_config(&config).is_ok());
+        config.providers.get_mut("local").unwrap().protocol = Some("unknown_wire_format".into());
+        assert!(Providers::from_config(&config).is_err());
+    }
+
+    #[tokio::test]
+    async fn transport_preserves_failure_and_refuses_sdk_retries() {
+        use rig::http_client::{HttpClientExt, Request};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut bytes = [0; 4096];
+            assert!(socket.read(&mut bytes).unwrap() > 0);
+            socket.write_all(b"HTTP/1.1 503 Unavailable\r\nContent-Length: 6\r\nConnection: close\r\n\r\nSECRET").unwrap();
+        });
+        let url = format!("http://{address}/v1/chat/completions");
+        let transport = transport::Transport {
+            client: Some(
+                Client::builder()
+                    .timeout(Duration::from_secs(2))
+                    .build()
+                    .unwrap(),
+            ),
+            url: Some(Url::parse(&url).unwrap()),
+            ..Default::default()
+        };
+        let request = || {
+            Request::builder()
+                .method("POST")
+                .uri(&url)
+                .body(Vec::<u8>::new())
+                .unwrap()
+        };
+        let response = transport.send_streaming(request()).await.unwrap();
+        assert!(response.into_body().next().await.is_none());
+        assert!(matches!(
+            transport.state.lock().unwrap().result,
+            Some(Err(OscarError::Provider {
+                transient: true,
+                ..
+            }))
+        ));
+        assert!(transport.send_streaming(request()).await.is_err());
+        assert!(!format!("{:?}", transport.state.lock().unwrap().result).contains("SECRET"));
+        tokio::task::spawn_blocking(move || server.join().unwrap())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn rig_sends_native_history_and_schemas_and_preserves_raw_arguments() {
+        use crate::tools::{Effect, Field, InputSchema, InputType, ToolDefinition};
+        use serde_json::json;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut chunk = [0; 4096];
+            let request = loop {
+                let n = socket.read(&mut chunk).unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&chunk[..n]);
+                assert!(bytes.len() < 65_536);
+                if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let headers = std::str::from_utf8(&bytes[..end])
+                        .unwrap()
+                        .to_ascii_lowercase();
+                    assert!(headers.starts_with("post /v1/chat/completions "));
+                    assert!(!headers.contains("authorization:"));
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|s| s.strip_prefix("content-length: "))
+                        .unwrap()
+                        .parse()
+                        .unwrap();
+                    if bytes.len() >= end + 4 + length {
+                        break serde_json::from_slice::<serde_json::Value>(
+                            &bytes[end + 4..end + 4 + length],
+                        )
+                        .unwrap();
+                    }
+                }
+            };
+            let body = format!(
+                "data: {}\n\ndata: [DONE]\n\n",
+                json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"next","type":"function","function":{"name":"inspect","arguments":"{\"text\":\"first\",\"text\":\"second\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":3}})
+            );
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).unwrap();
+            request
+        });
+        let p = HttpProvider::new(
+            &provider(&format!("http://{address}/v1/chat/completions")),
+            true,
+            2000,
+        )
+        .unwrap();
+        let request = ModelRequest {
+            context: "legacy context".into(),
+            messages: vec![
+                ModelMessage::User {
+                    content: "inspect data".into(),
+                },
+                ModelMessage::Assistant {
+                    content: String::new(),
+                    tool_calls: vec![ModelToolCall {
+                        id: "previous".into(),
+                        name: "inspect".into(),
+                        arguments: r#"{"text":"sample"}"#.into(),
+                    }],
+                },
+                ModelMessage::Tool {
+                    tool_call_id: "previous".into(),
+                    content: "tool evidence".into(),
+                },
+            ],
+            tools: vec![ToolDefinition {
+                name: "inspect".into(),
+                description: "Inspect text".into(),
+                effect: Effect::ReadOnly,
+                input: InputSchema {
+                    fields: [(
+                        "text".into(),
+                        Field {
+                            required: true,
+                            value_type: InputType::Text { max_bytes: 100 },
+                        },
+                    )]
+                    .into(),
+                },
+            }],
+            max_output_bytes: 1000,
+            max_output_tokens: 10,
+        };
+        let expected_bytes = request.input_bytes(&p.model).unwrap();
+        let output = p.infer(request).await.unwrap();
+        assert_eq!(output.tool_calls[0].id, "next");
+        assert_eq!(
+            output.tool_calls[0].arguments,
+            r#"{"text":"first","text":"second"}"#
+        );
+        assert_eq!(output.usage.input, Some(11));
+        let wire = tokio::task::spawn_blocking(move || server.join().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(wire.to_string().len(), expected_bytes);
+        assert_eq!(wire["messages"][2]["tool_calls"][0]["id"], "previous");
+        assert_eq!(wire["messages"][3]["role"], "tool");
+        assert_eq!(wire["messages"][3]["tool_call_id"], "previous");
+        assert_eq!(
+            wire["tools"][0]["function"]["parameters"]["additionalProperties"],
+            false
+        );
+        assert_eq!(wire["stream"], true);
     }
     async fn response(status: &str, body: &str, max: usize) -> Result<ModelOutput, OscarError> {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -218,6 +451,58 @@ mod tests {
             assert!(matches!(error, OscarError::Provider { transient: t, .. } if t == transient));
             assert!(!error.to_string().contains("TOP_SECRET"));
         }
+    }
+    #[tokio::test]
+    async fn rig_message_tracing_is_suppressed_per_request() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct RecordingSubscriber(Arc<AtomicUsize>);
+        impl tracing::Subscriber for RecordingSubscriber {
+            fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+                true
+            }
+            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                tracing::span::Id::from_u64(1)
+            }
+            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+            fn event(&self, _: &tracing::Event<'_>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+            fn enter(&self, _: &tracing::span::Id) {}
+            fn exit(&self, _: &tracing::span::Id) {}
+            fn max_level_hint(&self) -> Option<tracing::level_filters::LevelFilter> {
+                Some(tracing::level_filters::LevelFilter::TRACE)
+            }
+        }
+        let captured = Arc::new(AtomicUsize::new(0));
+        let output = response(
+            "200 OK",
+            r#"{"choices":[{"index":0,"delta":{"content":"PRIVATE"},"finish_reason":"stop"}]}"#,
+            100,
+        )
+        .with_subscriber(RecordingSubscriber(captured.clone()))
+        .await
+        .unwrap();
+        assert_eq!(output.content, "PRIVATE");
+        assert_eq!(captured.load(Ordering::SeqCst), 0);
+    }
+    #[tokio::test]
+    async fn compatible_empty_tool_arrays_do_not_interrupt_text_streaming() {
+        let body = r#"data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"","tool_calls":[]}}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"hello","tool_calls":[]}}]}
+
+data: {"choices":[{"index":0,"delta":{"content":" world","tool_calls":[]},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#;
+        let output = response("200 OK", body, 100).await.unwrap();
+        assert_eq!(output.content, "hello world");
+        assert!(output.tool_calls.is_empty());
     }
     #[tokio::test]
     async fn malformed_tools_and_oversized_responses_fail_closed() {

@@ -114,12 +114,12 @@ pub async fn execute(
 ) -> Result<RunReport, OscarError> {
     plan.validate(&config)?;
     for task in &plan.tasks {
-        if let ValidationStrategy::Registered(name) = &task.validation {
-            if !validators.contains_key(name) {
-                return Err(OscarError::Plan(
-                    "plan names an unregistered validator".into(),
-                ));
-            }
+        if let ValidationStrategy::Registered(name) = &task.validation
+            && !validators.contains_key(name)
+        {
+            return Err(OscarError::Plan(
+                "plan names an unregistered validator".into(),
+            ));
         }
     }
     let run_id = format!(

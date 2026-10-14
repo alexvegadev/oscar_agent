@@ -1,5 +1,7 @@
 # ADR 0007: Opt-in session retrieval behind OSCAR's context boundary
 
+The compiler/Rig pin decisions below are superseded by [ADR 0014](0014-rig-providers.md).
+
 ## Context
 
 Interactive agent mode appends loaded files to every completion request. This
