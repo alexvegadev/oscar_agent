@@ -13,10 +13,11 @@ See [agent mode](docs/agent-mode.md) for real-provider setup, commands and limit
 
 An experimental GPUI desktop proposal chat is available with
 `cargo +stable run -p oscar-code --features desktop`. It supports Markdown,
-multiline input, cancellation, reset and non-secret preferences. See
+multiline input, cancellation, reset, a themed sidebar/composer and a separate
+Settings window for non-secret behavior preferences. See
 [OSCAR Code](docs/oscar-code.md) for setup and implementation-plan status.
 Native provider text streaming is available in the CLI and desktop. Desktop
-**Settings → Enable autonomous tools** runs a bounded model → registry → model
+**Settings → Autonomous read-only tools → Apply & save** runs a bounded model → registry → model
 loop with the pure `text_stats` starter tool, typed nested results and live run
 events. OpenAI-compatible providers receive native tool schemas, `tool_calls`
 and correlated tool results with the `http` feature. The mock configuration works

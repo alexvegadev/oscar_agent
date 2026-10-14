@@ -87,6 +87,7 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
                         size(px(1100.), px(800.)),
                         cx,
                     ))),
+                    window_min_size: Some(size(px(860.), px(620.))),
                     ..Default::default()
                 },
                 cx,

@@ -1,8 +1,8 @@
 # OSCAR Code desktop chat and autonomous tools
 
 `oscar-code` is an experimental GPUI desktop conversation UI. It uses OSCAR's
-existing inference-only provider boundary. It does not execute repository tools,
-apply edits, or run commands. The supplied configuration works without credentials.
+existing provider boundary and an opt-in read-only tool registry. It does not
+apply edits or run commands. The supplied configuration works without credentials.
 
 ```bash
 cargo +stable run -p oscar-code --features desktop
@@ -16,6 +16,19 @@ headless session library retains the workspace's Rust 1.88 support. Desktop
 dependencies and native platform prerequisites are isolated behind `desktop`;
 Windows is the initial verified build target. Linux/macOS desktop builds and
 visual review on a native display have not been verified.
+
+## Interface and appearance
+
+The themed GPUI Kit interface has a workspace sidebar, a centered conversation,
+a focused composer, starter prompts, and a separate native **Settings** window.
+The workspace uses GPUI Kit Dock: drag the divider between the sidebar and
+conversation to resize them. The sidebar starts at 220 pixels; the dock enforces
+minimum pane sizes. Widths remain in memory across chat updates and conversation
+resets, and return to the default on restart.
+Both dark and light palettes use Kit theme tokens for surfaces, text, borders,
+and corner radii. Starter prompts fill the composer for review before sending.
+**Run events** opens a bounded activity panel. **New conversation** clears history
+while preserving execution budgets; it is the Reset action described below.
 
 ## Conversation
 
@@ -102,11 +115,11 @@ for omitting secrets from data explicitly displayed in the UI.
 
 Provider configuration defaults to `settings.toml`; select another file with
 `--config PATH`. Configure models, URLs, capabilities and `api_key_env` using the
-same [core provider settings](hybrid.md). The settings panel displays the selected
+same [core provider settings](hybrid.md). The Settings window displays the selected
 model. It does not edit or persist API keys. Environment variables must be set
 before launching the application. The optional `http` feature enables real adapters.
 
-In mixed mode, **Use remote (share chat)** explicitly selects the configured remote
+In mixed mode, **Use remote provider** explicitly selects the configured remote
 provider and shares subsequent conversation context with it. Local/full-remote
 modes and `planning.local_only_data` constrain selection. There is no automatic
 fallback or escalation. Providers must declare code analysis and code generation.
@@ -115,7 +128,14 @@ token upper bound plus output tokens and 256 tokens of margin. Configured remote
 cost caps require both input/output prices and must pass before inference.
 
 Desktop preferences default to `oscar-code.toml` in the current directory; select
-another path with `--ui-settings PATH`. **Save preferences** explicitly writes only
+another path with `--ui-settings PATH`. Open **Settings** in the sidebar to edit
+dark/light appearance, local/remote provider selection, autonomous read-only tools,
+turn limit, run timeout, and tool calls per run. Changes remain a draft until
+**Apply & save** succeeds; closing without applying discards the draft when reopened.
+An existing Settings window is focused instead of creating duplicates. Behavior
+controls are disabled during active runs and saves. Host work modes and local-only
+policy still constrain provider selection. Failed validation or writes leave the
+applied preferences unchanged. **Apply & save** explicitly writes only
 these fields, and rejects reuse of the provider config path at startup:
 
 ```toml
@@ -127,7 +147,7 @@ autonomous = false
 max_tool_calls = 16
 ```
 
-Turn limits accept 1–256; timeouts accept 1–3,600,000 ms. The effective inference
+Turn limits accept 1–256; timeouts accept 1–3,600,000 ms; tool limits accept 1–64. The effective inference
 deadline is the minimum of the desktop timeout and core call/run timeouts.
 Core input/output byte bounds and output token limits apply unchanged. Core
 remote call/input budgets also apply and count failed/cancelled admitted requests.
@@ -145,7 +165,7 @@ The default configuration starts no MCP servers.
 
 ## Autonomous runtime and events
 
-Open **Settings**, select **Enable autonomous tools**, then **Send**. This is an
+Open **Settings**, enable **Autonomous read-only tools**, choose **Apply & save**, then **Send**. This is an
 explicit opt-in to model-requested, registered read-only actions. The desktop
 registers only `text_stats`, a pure tool that counts UTF-8 bytes, characters and
 lines of supplied text and returns nested JSON. It has no filesystem, process,
@@ -203,7 +223,7 @@ Every model request, including continuations, consumes the shared desktop turn
 budget (default 32) and applicable remote call/input budgets. Failed/cancelled
 admissions remain consumed across Stop, Reset, and provider/mode switches. Context
 window, input byte limits and configured remote cost bounds are rechecked for
-every request. There is no provider fallback. **Use remote (share chat)** includes
+every request. There is no provider fallback. **Use remote provider** includes
 autonomous conversation/tool evidence and remains constrained by work modes and
 `planning.local_only_data`.
 
@@ -253,6 +273,7 @@ accumulating uncancellable writes.
 - [x] User/model/system rendering, Markdown, multiline input, Send/Stop/Reset.
 - [x] Existing mock and optional HTTP inference providers, bounded background work.
 - [x] Non-secret TOML preferences, provider selection, dark/light theme, limits.
+- [x] Themed sidebar/composer and separate Settings window with validated draft/apply behavior.
 - [x] Native provider text streaming, bounded previews, cancellation and final usage metadata.
 - [x] Typed tool-call/result messages with nested structured output.
 - [x] Autonomous model → registry tool → model runtime and runtime event subscription.
@@ -274,8 +295,9 @@ shared remote budgets.
 The optional GPUI test renders the actual view and clicks its controls without
 live credentials. It also renders nested tool successes and failures in both
 themes and verifies accessible tree labels and Reset. A second test clicks the
-autonomous toggle and Send, waits for the actual subscribed runtime, and inspects
-its tool result and event history:
+autonomous switch and Send, waits for the actual subscribed runtime, and inspects
+its tool result and event history. Settings tests cover duplicate-window focus,
+draft isolation, invalid limits, active-run locks, save/reload, and failed saves:
 
 ```bash
 cargo test -p oscar-code
