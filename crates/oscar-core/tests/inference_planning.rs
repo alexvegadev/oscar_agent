@@ -46,6 +46,7 @@ impl ModelProvider for Recorder {
             }
             // Intentionally ignores max_output_bytes, exercising host-side bounds.
             Ok(ModelOutput {
+                tool_calls: Vec::new(),
                 content: self.content.clone(),
                 confidence: Confidence::High,
                 usage: TokenUsage {

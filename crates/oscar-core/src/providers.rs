@@ -11,6 +11,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+mod chat;
 #[cfg(feature = "http")]
 mod http;
 
@@ -24,6 +25,11 @@ pub type ModelTextSink<'a> = dyn FnMut(&str) -> Result<(), OscarError> + Send + 
 /// Implementations must be nonblocking, cancellation-safe on drop, and inference-only.
 /// Never execute model-generated tools here. Host adapters must enforce output limits.
 pub trait ModelProvider: Send + Sync {
+    /// Native tool adapters return ordinary answer text and typed calls. Legacy
+    /// injected providers may retain the desktop JSON-envelope protocol.
+    fn native_tool_protocol(&self) -> bool {
+        false
+    }
     fn infer(&self, request: ModelRequest) -> ModelFuture<'_>;
 
     /// Native adapters override this to deliver text as it arrives. Legacy
@@ -37,7 +43,7 @@ pub trait ModelProvider: Send + Sync {
         Box::pin(async move {
             let limit = request.max_output_bytes;
             let output = self.infer(request).await?;
-            if output.content.len() > limit {
+            if output.byte_len() > limit {
                 return Err(OscarError::Limit("model output exceeds byte limit".into()));
             }
             if !output.content.is_empty() {
@@ -50,8 +56,23 @@ pub trait ModelProvider: Send + Sync {
 #[derive(Clone)]
 pub struct ModelRequest {
     pub context: String,
+    /// Structured conversation. Empty keeps the legacy single-user context path.
+    pub messages: Vec<ModelMessage>,
+    /// Host-selected registry definitions. Empty disables native tool calls.
+    pub tools: Vec<crate::tools::ToolDefinition>,
     pub max_output_bytes: usize,
     pub max_output_tokens: u32,
+}
+impl ModelRequest {
+    /// Count serialized native messages, schemas and fixed protocol overhead.
+    /// Legacy context is also counted for providers that still consume it.
+    pub fn input_bytes(&self, model: &str) -> Result<usize, OscarError> {
+        let wire = chat::body(model, self)?;
+        Ok(serde_json::to_vec(&wire)
+            .map_err(|_| OscarError::Validation("cannot encode model request".into()))?
+            .len()
+            .max(self.context.len()))
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TokenUsage {
@@ -61,34 +82,108 @@ pub struct TokenUsage {
 #[derive(Debug, Clone)]
 pub struct ModelOutput {
     pub content: String,
+    /// Proposed actions only; adapters never execute these calls.
+    pub tool_calls: Vec<ModelToolCall>,
     pub confidence: Confidence,
     pub usage: TokenUsage,
+}
+
+/// Provider-neutral call. Preserve raw JSON so duplicate argument keys remain
+/// visible to registry validation. Debug deliberately redacts payloads.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ModelToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+impl std::fmt::Debug for ModelToolCall {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ModelToolCall([redacted])")
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "role", rename_all = "snake_case")]
+pub enum ModelMessage {
+    User {
+        content: String,
+    },
+    Assistant {
+        content: String,
+        tool_calls: Vec<ModelToolCall>,
+    },
+    Tool {
+        tool_call_id: String,
+        content: String,
+    },
+}
+impl std::fmt::Debug for ModelMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ModelMessage([redacted])")
+    }
+}
+
+impl ModelOutput {
+    /// Text plus call identifiers, names and raw arguments share one byte budget.
+    pub fn byte_len(&self) -> usize {
+        self.tool_calls
+            .iter()
+            .fold(self.content.len(), |bytes, call| {
+                bytes
+                    .saturating_add(call.id.len())
+                    .saturating_add(call.name.len())
+                    .saturating_add(call.arguments.len())
+            })
+    }
+    pub fn require_text(&self) -> Result<(), OscarError> {
+        if self.tool_calls.is_empty() {
+            Ok(())
+        } else {
+            Err(OscarError::Validation(
+                "tool calls are disabled for this request".into(),
+            ))
+        }
+    }
 }
 
 /// Scripted provider for deterministic offline testing. Exhausted scripts fail closed.
 pub struct MockProvider {
     replies: Mutex<VecDeque<Result<ModelOutput, OscarError>>>,
     demo: bool,
+    native_tools: bool,
 }
 impl MockProvider {
     pub fn scripted(replies: Vec<Result<ModelOutput, OscarError>>) -> Self {
         Self {
             replies: Mutex::new(replies.into()),
             demo: false,
+            native_tools: false,
+        }
+    }
+    /// Script native calls followed by ordinary Markdown answers.
+    pub fn scripted_native(replies: Vec<Result<ModelOutput, OscarError>>) -> Self {
+        Self {
+            native_tools: true,
+            ..Self::scripted(replies)
         }
     }
     pub fn demo() -> Self {
         Self {
             replies: Mutex::new(VecDeque::new()),
             demo: true,
+            native_tools: false,
         }
     }
 }
 impl ModelProvider for MockProvider {
+    fn native_tool_protocol(&self) -> bool {
+        self.native_tools
+    }
     fn infer(&self, request: ModelRequest) -> ModelFuture<'_> {
         Box::pin(async move {
             let reply = if self.demo {
                 Ok(ModelOutput {
+                    tool_calls: Vec::new(),
                     content: "Mock proposal artifact. No repository changes or commands executed."
                         .into(),
                     confidence: Confidence::High,
@@ -109,8 +204,11 @@ impl ModelProvider for MockProvider {
                         })
                     })
             }?;
-            if reply.content.len() > request.max_output_bytes {
+            if reply.byte_len() > request.max_output_bytes {
                 return Err(OscarError::Limit("model output exceeds byte limit".into()));
+            }
+            if request.tools.is_empty() {
+                reply.require_text()?;
             }
             Ok(reply)
         })

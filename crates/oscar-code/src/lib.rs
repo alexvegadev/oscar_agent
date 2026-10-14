@@ -1,4 +1,6 @@
-//! Bounded, in-memory desktop proposal sessions. Model output never executes tools.
+//! Bounded desktop conversations and opt-in registry-backed autonomous runs.
+pub mod messages;
+pub mod runtime;
 pub mod session;
 pub mod settings;
 

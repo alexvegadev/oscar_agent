@@ -16,7 +16,7 @@ provider = "mock"
 model = "local-demo"
 context_window = 132000
 max_concurrency = 2
-capabilities = ["code_generation", "code_analysis", "refactoring", "documentation", "testing", "summarization", "review"]
+capabilities = ["code_generation", "code_analysis", "refactoring", "documentation", "testing", "summarization", "review", "tool_use"]
 
 [providers.remote]
 enabled = true
@@ -24,7 +24,7 @@ provider = "mock"
 model = "remote-demo"
 context_window = 128000
 max_concurrency = 1
-capabilities = ["code_generation", "code_analysis", "refactoring", "documentation", "testing", "summarization", "advanced_reasoning", "architecture", "review", "planning"]
+capabilities = ["code_generation", "code_analysis", "refactoring", "documentation", "testing", "summarization", "advanced_reasoning", "architecture", "review", "planning", "tool_use"]
 
 # Proposed classifier settings; not implemented (see docs/decision-classification.md).
 #[classification]

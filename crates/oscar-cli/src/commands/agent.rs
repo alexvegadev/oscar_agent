@@ -462,6 +462,8 @@ impl Session {
         );
         let provider = self.providers.get(decision.provider)?;
         let request = ModelRequest {
+            messages: Vec::new(),
+            tools: Vec::new(),
             context,
             max_output_bytes: self.config.limits.max_output_bytes,
             max_output_tokens: self.config.limits.max_output_tokens,
@@ -480,6 +482,7 @@ impl Session {
             result = tokio::time::timeout(Duration::from_millis(self.config.limits.call_timeout_ms), provider.infer_stream(request, &mut bounded_sink)) =>
                 result.map_err(|_| OscarError::Limit("agent inference deadline exceeded".into()))??,
         };
+        reply.require_text()?;
         if reply.content.trim().is_empty() {
             return Err(OscarError::Validation("empty model reply".into()));
         }
@@ -519,6 +522,7 @@ mod tests {
             self.0.lock().unwrap().push(request.context);
             Box::pin(async {
                 Ok(ModelOutput {
+                    tool_calls: Vec::new(),
                     content: "Proposed diff".into(),
                     confidence: Confidence::High,
                     usage: TokenUsage::default(),
@@ -671,6 +675,7 @@ mod tests {
         assert_eq!(s.respond("hello", cancel).await, Err(OscarError::Cancelled));
         for content in ["".into(), "x".repeat(c.limits.max_output_bytes + 1)] {
             let provider = MockProvider::scripted(vec![Ok(ModelOutput {
+                tool_calls: Vec::new(),
                 content,
                 confidence: Confidence::High,
                 usage: TokenUsage::default(),

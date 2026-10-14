@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 fn output(text: &str) -> ModelOutput {
     ModelOutput {
+        tool_calls: Vec::new(),
         content: text.into(),
         confidence: Confidence::High,
         usage: TokenUsage::default(),
@@ -37,9 +38,9 @@ async fn mock_chat_completes_and_reset_preserves_budget_and_ids() {
     session.running(id);
     session.complete(id, run.execute(provider.clone()).await);
     assert_eq!(session.state, RunState::Completed);
-    assert_eq!(session.messages[1].role, Role::Model);
+    assert_eq!(session.messages()[1].role(), Role::Model);
     session.reset();
-    assert!(session.messages.is_empty());
+    assert!(session.messages().is_empty());
     assert_eq!(session.turns, 1);
     let run = session.begin("Try again").unwrap();
     assert!(run.id > id);
@@ -65,7 +66,12 @@ fn invalid_input_duplicate_submit_and_stale_completions_are_rejected() {
     session.stop();
     assert_eq!(session.state, RunState::Cancelled);
     session.complete(run.id, Ok(output("late result")));
-    assert!(!session.messages.iter().any(|m| m.content == "late result"));
+    assert!(
+        !session
+            .messages()
+            .iter()
+            .any(|m| m.text() == Some("late result"))
+    );
     session.reset();
     let next = session.begin("Next").unwrap();
     session.complete(run.id, Ok(output("stale")));
@@ -118,12 +124,10 @@ async fn adapter_errors_are_redacted_and_output_is_independently_bounded() {
         .await,
     );
     assert_eq!(session.state, RunState::Failed);
-    assert!(
-        !session
-            .messages
-            .iter()
-            .any(|m| m.content.contains("secret credential"))
-    );
+    assert!(!session.messages().iter().any(|m| {
+        m.text()
+            .is_some_and(|text| text.contains("secret credential"))
+    }));
     let run = session.begin("Oversized").unwrap();
     session.complete(run.id, Ok(output(&"x".repeat(16_385))));
     assert_eq!(session.state, RunState::LimitReached);
@@ -219,15 +223,15 @@ async fn native_stream_commits_once_and_provisional_text_is_not_history() {
         .execute_stream(Arc::new(Streaming), &mut |delta| {
             text.push_str(delta);
             session.preview(id, text.clone());
-            assert_eq!(session.messages.len(), 1);
+            assert_eq!(session.messages().len(), 1);
             Ok(())
         })
         .await;
     assert_eq!(session.preview, "hé🦀");
     session.complete(id, result);
     assert!(session.preview.is_empty());
-    assert_eq!(session.messages.len(), 2);
-    assert_eq!(session.messages[1].content, "hé🦀");
+    assert_eq!(session.messages().len(), 2);
+    assert_eq!(session.messages()[1].text(), Some("hé🦀"));
 }
 
 #[test]
@@ -247,7 +251,7 @@ fn stop_reset_failure_and_limits_discard_previews_and_ignore_late_updates() {
     session.preview(next.id, "unfinished".into());
     session.complete(next.id, Err(OscarError::Cancelled));
     assert!(session.preview.is_empty());
-    assert!(!session.messages.iter().any(|m| m.role == Role::Model));
+    assert!(!session.messages().iter().any(|m| m.role() == Role::Model));
 }
 
 #[tokio::test]
@@ -324,6 +328,40 @@ async fn deadline_and_stop_after_a_delta_discard_partial_text() {
         }
         session.complete(id, result);
         assert!(session.preview.is_empty());
-        assert!(!session.messages.iter().any(|m| m.role == Role::Model));
+        assert!(!session.messages().iter().any(|m| m.role() == Role::Model));
     }
+}
+
+struct UnsolicitedCall;
+impl ModelProvider for UnsolicitedCall {
+    fn infer(&self, request: ModelRequest) -> ModelFuture<'_> {
+        assert!(request.tools.is_empty());
+        Box::pin(async {
+            let mut output = output("claimed answer");
+            output
+                .tool_calls
+                .push(oscar_core::providers::ModelToolCall {
+                    id: "hidden".into(),
+                    name: "shell".into(),
+                    arguments: "{}".into(),
+                });
+            Ok(output)
+        })
+    }
+}
+#[tokio::test]
+async fn proposal_mode_rejects_unsolicited_typed_calls_from_injected_providers() {
+    let mut session = SessionState::new(Limits::default(), Settings::default());
+    let run = session.begin("Propose").unwrap();
+    let id = run.id;
+    let result = run.execute(Arc::new(UnsolicitedCall)).await;
+    assert!(matches!(result, Err(OscarError::Validation(_))));
+    session.complete(id, result);
+    assert_eq!(session.state, RunState::Failed);
+    assert!(
+        !session
+            .messages()
+            .iter()
+            .any(|m| m.text() == Some("claimed answer"))
+    );
 }

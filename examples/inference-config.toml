@@ -13,7 +13,7 @@ model = "your-local-model"
 api_url = "http://127.0.0.1:8080/v1/chat/completions"
 context_window = 32768
 max_concurrency = 1
-capabilities = ["planning", "code_analysis", "code_generation", "testing", "documentation", "review", "advanced_reasoning"]
+capabilities = ["planning", "code_analysis", "code_generation", "testing", "documentation", "review", "advanced_reasoning", "tool_use"]
 
 [limits]
 max_tasks = 16

@@ -24,6 +24,7 @@ fn single(c: &Config) -> Plan {
 }
 fn output(text: &str) -> Result<ModelOutput, OscarError> {
     Ok(ModelOutput {
+        tool_calls: Vec::new(),
         content: text.into(),
         confidence: Confidence::High,
         usage: TokenUsage {

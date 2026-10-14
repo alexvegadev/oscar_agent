@@ -168,6 +168,8 @@ async fn generate_inner(
         .as_deref()
         == Some("mock");
     let request = ModelRequest {
+        messages: Vec::new(),
+        tools: Vec::new(),
         context,
         max_output_bytes: config.limits.max_output_bytes,
         max_output_tokens: config.limits.max_output_tokens,
@@ -180,6 +182,7 @@ async fn generate_inner(
             provider.infer(request).await
         }) => result.map_err(|_| OscarError::Limit("planning inference deadline exceeded".into()))??,
     };
+    output.require_text()?;
     report.usage = output.usage;
     if cancel.is_cancelled() {
         return Err(OscarError::Cancelled);

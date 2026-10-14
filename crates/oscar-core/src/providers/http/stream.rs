@@ -22,9 +22,29 @@ struct Choice {
 #[derive(Deserialize)]
 struct Delta {
     content: Option<String>,
-    tool_calls: Option<serde_json::Value>,
+    tool_calls: Option<Vec<CallDelta>>,
     function_call: Option<serde_json::Value>,
     refusal: Option<String>,
+}
+#[derive(Deserialize)]
+struct CallDelta {
+    index: usize,
+    id: Option<String>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    function: Option<FunctionDelta>,
+}
+#[derive(Deserialize)]
+struct FunctionDelta {
+    name: Option<String>,
+    arguments: Option<String>,
+}
+#[derive(Default)]
+struct PendingCall {
+    id: String,
+    name: String,
+    arguments: String,
+    function: bool,
 }
 #[derive(Deserialize)]
 struct Usage {
@@ -47,6 +67,8 @@ pub(super) struct Decoder {
     usage: TokenUsage,
     finished: bool,
     saw_text: bool,
+    tools_enabled: bool,
+    calls: Vec<PendingCall>,
 }
 const FRAME_LIMIT: usize = 65_536;
 impl Decoder {
@@ -67,7 +89,43 @@ impl Decoder {
             usage: TokenUsage::default(),
             finished: false,
             saw_text: false,
+            tools_enabled: false,
+            calls: Vec::new(),
         }
+    }
+    pub(super) fn enable_tools(&mut self, enabled: bool) {
+        self.tools_enabled = enabled;
+    }
+    fn output_bytes(&self) -> usize {
+        self.calls.iter().fold(self.content.len(), |n, c| {
+            n.saturating_add(c.id.len())
+                .saturating_add(c.name.len())
+                .saturating_add(c.arguments.len())
+        })
+    }
+    fn calls_complete(&self) -> Result<(), OscarError> {
+        let identifier = |s: &str| {
+            !s.is_empty()
+                && s.len() <= 64
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+        };
+        let mut ids = std::collections::BTreeSet::new();
+        for call in &self.calls {
+            if !call.function
+                || !identifier(&call.id)
+                || !identifier(&call.name)
+                || !ids.insert(&call.id)
+            {
+                return Err(invalid("invalid or duplicate streamed tool call"));
+            }
+            if !serde_json::from_str::<serde_json::Value>(&call.arguments)
+                .is_ok_and(|v| v.is_object())
+            {
+                return Err(invalid("tool arguments must be a JSON object"));
+            }
+        }
+        Ok(())
     }
     pub(super) fn feed(
         &mut self,
@@ -142,7 +200,7 @@ impl Decoder {
     }
     fn event(&mut self, data: &[u8], sink: &mut ModelTextSink<'_>) -> Result<bool, OscarError> {
         if data == b"[DONE]" {
-            if !self.finished || !self.saw_text {
+            if !self.finished || (!self.saw_text && self.calls.is_empty()) {
                 return Err(invalid("incomplete inference stream"));
             }
             return Ok(true);
@@ -171,15 +229,64 @@ impl Decoder {
             if self.finished || choice.index != 0 {
                 return Err(invalid("unexpected inference choice"));
             }
-            if choice.delta.tool_calls.is_some() || choice.delta.function_call.is_some() {
+            if (choice.delta.tool_calls.is_some() && !self.tools_enabled)
+                || choice.delta.function_call.is_some()
+            {
                 return Err(invalid("tool calls are not supported by proposal workers"));
+            }
+            if let Some(calls) = choice.delta.tool_calls {
+                if calls.is_empty() || calls.len() > 32 {
+                    return Err(invalid("invalid streamed tool call count"));
+                }
+                let mut indices = std::collections::BTreeSet::new();
+                for delta in calls {
+                    if delta.index >= 32
+                        || delta.index > self.calls.len()
+                        || !indices.insert(delta.index)
+                    {
+                        return Err(invalid("invalid streamed tool call index"));
+                    }
+                    if delta.index == self.calls.len() {
+                        self.calls.push(PendingCall::default());
+                    }
+                    let call = &mut self.calls[delta.index];
+                    if let Some(kind) = delta.kind {
+                        if kind != "function" {
+                            return Err(invalid("unsupported tool call type"));
+                        }
+                        call.function = true;
+                    }
+                    if let Some(id) = delta.id {
+                        call.id.push_str(&id);
+                    }
+                    if let Some(function) = delta.function {
+                        if let Some(name) = function.name {
+                            call.name.push_str(&name);
+                        }
+                        if let Some(arguments) = function.arguments {
+                            call.arguments.push_str(&arguments);
+                        }
+                    }
+                    if call.id.len() > 64
+                        || call.name.len() > 64
+                        || self.output_bytes() > self.max_output_bytes
+                    {
+                        return Err(OscarError::Limit(
+                            "tool calls exceed output byte limit".into(),
+                        ));
+                    }
+                }
             }
             if choice.delta.refusal.as_ref().is_some_and(|s| !s.is_empty()) {
                 return Err(invalid("provider refused inference"));
             }
             // Validate the entire event before delivering any of its text.
             match choice.finish_reason.as_deref() {
-                Some("stop") => self.finished = true,
+                Some("stop") if self.calls.is_empty() => self.finished = true,
+                Some("tool_calls") if !self.calls.is_empty() => {
+                    self.calls_complete()?;
+                    self.finished = true;
+                }
                 Some("length") => {
                     return Err(OscarError::Limit("model token limit reached".into()));
                 }
@@ -187,7 +294,7 @@ impl Decoder {
                 None => {}
             }
             if let Some(text) = choice.delta.content {
-                if self.content.len().saturating_add(text.len()) > self.max_output_bytes {
+                if self.output_bytes().saturating_add(text.len()) > self.max_output_bytes {
                     return Err(OscarError::Limit("model output exceeds byte limit".into()));
                 }
                 self.saw_text = true;
@@ -201,6 +308,15 @@ impl Decoder {
     }
     pub(super) fn output(self) -> ModelOutput {
         ModelOutput {
+            tool_calls: self
+                .calls
+                .into_iter()
+                .map(|c| ModelToolCall {
+                    id: c.id,
+                    name: c.name,
+                    arguments: c.arguments,
+                })
+                .collect(),
             content: self.content,
             confidence: Confidence::Medium,
             usage: self.usage,
@@ -211,6 +327,96 @@ impl Decoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn event(delta: serde_json::Value, finish: Option<&str>) -> String {
+        format!(
+            "data: {}\n\n",
+            serde_json::json!({"choices":[{"index":0,"delta":delta,"finish_reason":finish}]})
+        )
+    }
+    #[test]
+    fn fragmented_native_calls_preserve_raw_arguments_and_complete_without_text() {
+        let wire = format!(
+            "{}{}{}data: [DONE]\n\n",
+            event(
+                serde_json::json!({"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"read","arguments":"{\"path\":"}},{"index":1,"id":"c2","type":"function","function":{"name":"stats","arguments":"{}"}}]}),
+                None
+            ),
+            event(
+                serde_json::json!({"tool_calls":[{"index":0,"function":{"arguments":"\"a\",\"path\":\"b\"}"}}]}),
+                None
+            ),
+            event(serde_json::json!({}), Some("tool_calls"))
+        );
+        for split in 1..=wire.len() {
+            let mut decoder = Decoder::new(200, 10);
+            decoder.enable_tools(true);
+            let mut done = false;
+            for bytes in wire.as_bytes().chunks(split) {
+                if decoder
+                    .feed(bytes, &mut |_| panic!("no text expected"))
+                    .unwrap()
+                {
+                    done = true;
+                    break;
+                }
+            }
+            assert!(done);
+            let output = decoder.output();
+            assert_eq!(output.tool_calls.len(), 2);
+            assert_eq!(
+                output.tool_calls[0].arguments,
+                "{\"path\":\"a\",\"path\":\"b\"}"
+            );
+            assert_eq!(output.tool_calls[1].id, "c2");
+        }
+    }
+    #[test]
+    fn native_calls_reject_bad_indices_ids_json_finish_and_limits() {
+        for (calls, finish) in [
+            (
+                serde_json::json!([{"index":1,"id":"c","type":"function","function":{"name":"read","arguments":"{}"}}]),
+                "tool_calls",
+            ),
+            (
+                serde_json::json!([{"index":0,"id":"c","type":"shell","function":{"name":"read","arguments":"{}"}}]),
+                "tool_calls",
+            ),
+            (
+                serde_json::json!([{"index":0,"id":"c","type":"function","function":{"name":"read","arguments":"[]"}}]),
+                "tool_calls",
+            ),
+            (
+                serde_json::json!([{"index":0,"id":"c","type":"function","function":{"name":"read","arguments":"{"}}]),
+                "tool_calls",
+            ),
+            (
+                serde_json::json!([{"index":0,"id":"c","type":"function","function":{"name":"read","arguments":"{}"}}]),
+                "stop",
+            ),
+            (
+                serde_json::json!([{"index":0,"id":"c","type":"function","function":{"name":"read","arguments":"{}"}},{"index":1,"id":"c","type":"function","function":{"name":"read","arguments":"{}"}}]),
+                "tool_calls",
+            ),
+        ] {
+            let mut decoder = Decoder::new(200, 10);
+            decoder.enable_tools(true);
+            assert!(
+                decoder
+                    .feed(
+                        event(serde_json::json!({"tool_calls":calls}), Some(finish)).as_bytes(),
+                        &mut |_| Ok(())
+                    )
+                    .is_err()
+            );
+        }
+        let mut decoder = Decoder::new(5, 10);
+        decoder.enable_tools(true);
+        assert!(matches!(decoder.feed(event(serde_json::json!({"tool_calls":[{"index":0,"id":"c","type":"function","function":{"name":"read","arguments":"{}"}}]}), None).as_bytes(), &mut |_| Ok(())), Err(OscarError::Limit(_))));
+        let mut decoder = Decoder::new(200, 10);
+        decoder.enable_tools(true);
+        decoder.feed(event(serde_json::json!({"tool_calls":[{"index":0,"id":"c","type":"function","function":{"name":"read","arguments":"{}"}}]}), None).as_bytes(), &mut |_| Ok(())).unwrap();
+        assert!(decoder.feed(b"data: [DONE]\n\n", &mut |_| Ok(())).is_err());
+    }
     fn text(content: &str, finish: Option<&str>) -> String {
         format!(
             "data: {}\n\n",

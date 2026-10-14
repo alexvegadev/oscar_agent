@@ -1,4 +1,6 @@
 use crate::{
+    messages::{Message, ToolOutcome},
+    runtime::{self, EVENT_CAPACITY},
     session::{Role, SessionState},
     settings::Settings,
 };
@@ -8,17 +10,21 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
 };
+#[cfg(feature = "ui-tests")]
+use gpui_kit::test::TestSupportExt;
 use oscar_core::{
     config::{Capability, Config, WorkMode},
     error::OscarError,
     planning::ProviderPreference,
     providers::Providers,
+    tools::ToolRegistry,
 };
 use std::{path::PathBuf, sync::Arc};
 
 pub struct Chat {
     session: SessionState,
     providers: Providers,
+    registry: Arc<ToolRegistry>,
     config: Config,
     settings: Settings,
     settings_path: PathBuf,
@@ -28,6 +34,7 @@ pub struct Chat {
     turns: Entity<InputState>,
     timeout: Entity<InputState>,
     settings_open: bool,
+    events_open: bool,
     notice: String,
     scroll: ScrollHandle,
     task: Option<Task<()>>,
@@ -79,6 +86,8 @@ impl Chat {
         Ok(Self {
             session: SessionState::new(config.limits.clone(), settings.clone()),
             providers,
+            registry: runtime::starter_registry()
+                .map_err(|_| OscarError::Config("cannot register desktop starter tools".into()))?,
             input,
             _input_subscription: input_subscription,
             turns: cx.new(|cx| {
@@ -96,6 +105,7 @@ impl Chat {
             settings_path,
             runtime,
             settings_open: false,
+            events_open: false,
             notice: String::new(),
             scroll: ScrollHandle::new(),
             task: None,
@@ -108,6 +118,10 @@ impl Chat {
             return;
         }
         if self.session.update_settings(self.settings.clone()).is_err() {
+            return;
+        }
+        if self.settings.autonomous {
+            self.submit_agent(window, cx);
             return;
         }
         let configured = &self.config.providers[self.settings.provider.key()];
@@ -283,34 +297,124 @@ impl Chat {
         cx.notify();
     }
 
-    fn message(index: usize, role: Role, content: &str, dark: bool) -> AnyElement {
-        let title = match role {
-            Role::User => "You",
-            Role::Model => "OSCAR",
-            Role::Tool => "Tool",
-            Role::System => "System",
+    fn submit_agent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let prompt = self.input.read(cx).value().to_string();
+        let run = match self.session.begin_agent(
+            &prompt,
+            &self.config,
+            self.registry.clone(),
+            runtime::starter_policy(),
+        ) {
+            Ok(run) => run,
+            Err(error) => {
+                self.notice = error.to_string();
+                cx.notify();
+                return;
+            }
         };
-        let body = if role == Role::Model {
-            // Untrusted Markdown must not fetch external images or open URLs.
-            gpui_kit::base::TextView::markdown(("body", index), content.to_owned())
-                .selectable(true)
-                .scrollable(false)
-                .on_link_click(|_, _, _, _| {})
-                .image_source(|_| {
-                    ImageSource::Image(Arc::new(Image::from_bytes(
-                        ImageFormat::Svg,
-                        b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec(),
-                    )))
-                })
-                .into_any_element()
+        let id = run.id();
+        let provider = if self.config.providers[self.settings.provider.key()]
+            .provider
+            .as_deref()
+            == Some("mock")
+        {
+            runtime::demo_provider(id, &prompt)
         } else {
-            div()
+            match self.providers.get(self.settings.provider) {
+                Ok(provider) => provider,
+                Err(error) => {
+                    self.session.complete(id, Err(error));
+                    cx.notify();
+                    return;
+                }
+            }
+        };
+        self.notice.clear();
+        self.input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.session.running(id);
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(EVENT_CAPACITY);
+        let handle = self.runtime.spawn(run.execute(provider, sender));
+        self.task = Some(cx.spawn(async move |this, cx| {
+            // Drain every event in order before applying the authoritative report.
+            // This avoids dropping queued tool messages when inference finishes first.
+            while let Some(event) = receiver.recv().await {
+                if this
+                    .update(cx, |this, cx| {
+                        this.session.apply_runtime_event(event);
+                        this.scroll.scroll_to_bottom();
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    handle.abort();
+                    return;
+                }
+            }
+            let report = handle.await;
+            let _ = this.update(cx, |this, cx| {
+                match report {
+                    Ok(report) => this.session.finish_agent(report),
+                    Err(_) => this.session.complete(
+                        id,
+                        Err(OscarError::Unavailable("runtime worker stopped".into())),
+                    ),
+                }
+                this.scroll.scroll_to_bottom();
+                cx.notify();
+            });
+        }));
+        self.scroll.scroll_to_bottom();
+        cx.notify();
+    }
+
+    fn message(index: usize, message: &Message, dark: bool) -> AnyElement {
+        let role = message.role();
+        let title = match message {
+            Message::User(_) => "You".to_owned(),
+            Message::Model(_) => "OSCAR".to_owned(),
+            Message::System(_) => "System".to_owned(),
+            Message::ToolCall(call) => format!("Tool call · {} · {}", call.name(), call.id()),
+            Message::ToolResult(result) => format!(
+                "Tool result · {} · {} · {}",
+                result.name(),
+                result.call_id(),
+                if matches!(result.outcome(), ToolOutcome::Success(_)) {
+                    "Success"
+                } else {
+                    "Error"
+                }
+            ),
+        };
+        let body = match message {
+            Message::Model(content) => {
+                // Untrusted Markdown must not fetch external images or open URLs.
+                gpui_kit::base::TextView::markdown(("body", index), content.to_owned())
+                    .selectable(true)
+                    .scrollable(false)
+                    .on_link_click(|_, _, _, _| {})
+                    .image_source(|_| {
+                        ImageSource::Image(Arc::new(Image::from_bytes(
+                            ImageFormat::Svg,
+                            b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>"
+                                .to_vec(),
+                        )))
+                    })
+                    .into_any_element()
+            }
+            Message::User(content) | Message::System(content) => div()
                 .whitespace_normal()
                 .child(content.to_owned())
-                .into_any_element()
+                .into_any_element(),
+            Message::ToolCall(call) => Self::structured("Arguments", call.arguments().value()),
+            Message::ToolResult(result) => match result.outcome() {
+                ToolOutcome::Success(data) => Self::structured("Output", data.value()),
+                ToolOutcome::Failure(error) => div().child(error.to_string()).into_any_element(),
+            },
         };
-        div()
+        let view = div()
             .id(("message", index))
+            .aria_label(title.clone())
             .w_full()
             .p_4()
             .rounded_lg()
@@ -332,8 +436,59 @@ impl Chat {
                     .text_color(rgb(0x7f9fbc))
                     .child(title),
             )
-            .child(body)
-            .into_any_element()
+            .child(body);
+        #[cfg(feature = "ui-tests")]
+        let view = view.test_support();
+        view.into_any_element()
+    }
+
+    // StructuredData has already bounded depth and node count. Render literal text;
+    // even strings containing Markdown, URLs or file paths have no click/fetch action.
+    fn structured(label: &str, value: &serde_json::Value) -> AnyElement {
+        let (summary, children): (String, Vec<AnyElement>) = match value {
+            serde_json::Value::Object(values) => (
+                format!("{{}} · {} fields", values.len()),
+                values
+                    .iter()
+                    .map(|(key, value)| {
+                        Self::structured(&serde_json::Value::String(key.clone()).to_string(), value)
+                    })
+                    .collect(),
+            ),
+            serde_json::Value::Array(values) => (
+                format!("[] · {} items", values.len()),
+                values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, value)| Self::structured(&format!("[{i}]"), value))
+                    .collect(),
+            ),
+            scalar => (scalar.to_string(), Vec::new()),
+        };
+        let description = format!("{label}: {summary}");
+        let view = div()
+            .id(SharedString::from(label.to_owned()))
+            .aria_label(description.clone())
+            .flex()
+            .flex_col()
+            .gap_1()
+            .whitespace_normal()
+            .child(div().child(description))
+            .when(!children.is_empty(), |view| {
+                view.child(
+                    div()
+                        .pl_4()
+                        .border_l_1()
+                        .border_color(rgb(0x384355))
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .children(children),
+                )
+            });
+        #[cfg(feature = "ui-tests")]
+        let view = view.test_support();
+        view.into_any_element()
     }
 }
 
@@ -379,6 +534,14 @@ impl Render for Chat {
                                 this.settings_open = !this.settings_open;
                                 cx.notify();
                             })),
+                    )
+                    .child(
+                        Button::new("events")
+                            .label("Run events")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.events_open = !this.events_open;
+                                cx.notify();
+                            })),
                     ),
             );
         if self.settings_open {
@@ -388,6 +551,9 @@ impl Render for Chat {
                 .child(div().flex().gap_2().items_center()
                     .child("Turn limit").child(Input::new(&self.turns).w(px(90.)))
                     .child("Timeout (ms)").child(Input::new(&self.timeout).w(px(140.)))
+                    .child(Button::new("autonomous").label(if self.settings.autonomous { "Tools on (text stats)" } else { "Enable autonomous tools" }).disabled(active || self.saving).on_click(cx.listener(|this, _, _, cx| {
+                        this.settings.autonomous = !this.settings.autonomous; cx.notify();
+                    })))
                     .child(Button::new("provider").label(if self.settings.provider == ProviderPreference::Local { "Use remote (share chat)" } else { "Use local" }).disabled(active || self.saving || self.config.planning.local_only_data || self.config.work_mode != WorkMode::Mixed || self.providers.remote.is_none()).on_click(cx.listener(|this, _, _, cx| {
                         this.settings.provider = if this.settings.provider == ProviderPreference::Local { ProviderPreference::Remote } else { ProviderPreference::Local }; cx.notify();
                     })))
@@ -398,16 +564,23 @@ impl Render for Chat {
         }
         div().size_full().flex().flex_col().bg(rgb(if dark { 0x10141b } else { 0xffffff })).text_color(rgb(if dark { 0xe2e8f0 } else { 0x1b2430 }))
             .child(header)
+            .when(!self.session.runtime_events().is_empty(), |view| view.child(
+                div().px_4().py_2().text_sm().child(format!("Runtime: {} · {} events", self.session.runtime_events().last().map_or("Idle", |event| event.phase), self.session.runtime_events().len()))
+            ))
+            .when(self.events_open, |view| view.child(
+                div().id("runtime-events").max_h(px(160.)).overflow_y_scroll().px_4().py_2().text_sm()
+                    .children(self.session.runtime_events().iter().map(|event| div().child(format!("#{} {}{}", event.sequence, event.phase, event.failure.map_or(String::new(), |failure| format!(" · {failure:?}"))))))
+            ))
             .child(div().id("history").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.scroll).p_6()
                 .child(div().w_full().max_w(px(900.)).mx_auto().flex().flex_col().gap_4()
-                    .when(self.session.messages.is_empty(), |view| view.child(div().p_6().child("What would you like to build?").child(div().text_sm().mt_2().child("Ask for a coding proposal. This session keeps conversation in memory."))))
-                    .children(self.session.messages.iter().enumerate().map(|(i, m)| Self::message(i, m.role, &m.content, dark)))
-                    .when(!self.session.preview.is_empty(), |view| view.child(Self::message(self.session.messages.len(), Role::Model, &self.session.preview, dark)))))
+                    .when(self.session.messages().is_empty(), |view| view.child(div().p_6().child("What would you like to build?").child(div().text_sm().mt_2().child("Ask for a coding proposal. This session keeps conversation in memory."))))
+                    .children(self.session.messages().iter().enumerate().map(|(i, m)| Self::message(i, m, dark)))
+                    .when(!self.session.preview.is_empty(), |view| view.child(Self::message(self.session.messages().len(), &Message::Model(self.session.preview.clone()), dark)))))
             .child(div().p_4().border_t_1().border_color(rgb(0x384355)).flex().flex_col().gap_2()
                 .child(div().text_sm().child(self.notice.clone()))
                 .child(Textarea::new(&self.input).w_full().disabled(active || self.saving).aria_label("Message OSCAR"))
                 .child(div().flex().justify_between().items_center()
-                    .child(div().text_sm().text_color(rgb(0x7f9fbc)).child("Proposals only · Enter inserts a new line · Reset preserves turn budget"))
+                    .child(div().text_sm().text_color(rgb(0x7f9fbc)).child(if self.settings.autonomous { "Autonomous read-only tools · Enter inserts a new line · Reset preserves budgets" } else { "Proposals only · Enter inserts a new line · Reset preserves turn budget" }))
                     .child(if active {
                         Button::new("stop").label("Stop Generation").on_click(cx.listener(|this, _, _, cx| { this.session.stop(); cx.notify(); }))
                     } else {
@@ -419,13 +592,94 @@ impl Render for Chat {
 #[cfg(all(test, feature = "ui-tests"))]
 mod tests {
     use super::Chat;
-    use crate::{session::RunState, settings::Settings};
+    use crate::{
+        messages::{StructuredData, ToolCall, ToolOutcome, ToolResult},
+        session::RunState,
+        settings::Settings,
+    };
     use gpui::{AppContext, Bounds, TestAppContext, WindowBounds, WindowOptions, px, size};
-    use gpui_kit::test::TestWindowExt;
+    use gpui_kit::test::{TestAppContextExt, TestWindowExt};
     use oscar_core::config::Config;
+    use oscar_core::tools::ToolError;
 
     #[gpui::test]
-    fn actual_buttons_submit_stop_reset_and_change_theme(cx: &mut TestAppContext) {
+    async fn autonomous_send_subscribes_to_live_events_and_renders_registry_results(
+        cx: &mut TestAppContext,
+    ) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let handle = runtime.handle().clone();
+        let (window, chat) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            gpui_kit::open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                        None,
+                        size(px(1200.), px(900.)),
+                        cx,
+                    ))),
+                    ..Default::default()
+                },
+                cx,
+                |window, cx| {
+                    cx.new(|cx| {
+                        Chat::new(
+                            Config::parse(include_str!("../../../settings.toml")).unwrap(),
+                            Settings::default(),
+                            "unused-ui-test.toml".into(),
+                            handle,
+                            window,
+                            cx,
+                        )
+                        .unwrap()
+                    })
+                },
+            )
+            .unwrap()
+        });
+        cx.update_window(window, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("settings", cx);
+            window.click("autonomous", cx);
+            assert!(chat.read(cx).settings.autonomous);
+            chat.update(cx, |chat, cx| {
+                chat.input
+                    .update(cx, |input, cx| input.set_value("hello", window, cx))
+            });
+            window.click("submit", cx);
+        })
+        .unwrap();
+        cx.wait_for(window, std::time::Duration::from_secs(3), |_, cx| {
+            chat.read(cx).session.state == RunState::Completed
+        })
+        .await;
+        cx.update_window(window, |_, window, cx| {
+            assert_eq!(chat.read(cx).session.turns, 2);
+            assert_eq!(chat.read(cx).session.runtime_events().len(), 8);
+            assert_eq!(
+                window.find(("message", 1usize)).label(),
+                Some("Tool call · text_stats · r1.stats")
+            );
+            assert_eq!(
+                window.within(("message", 2usize)).find("\"bytes\"").label(),
+                Some("\"bytes\": 5")
+            );
+            window.click("events", cx);
+            assert!(chat.read(cx).events_open);
+            window.click("reset", cx);
+            assert!(chat.read(cx).session.messages().is_empty());
+            assert!(chat.read(cx).session.runtime_events().is_empty());
+            assert_eq!(chat.read(cx).session.turns, 2);
+        })
+        .unwrap();
+        runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+    }
+
+    #[gpui::test]
+    fn actual_buttons_and_nested_tool_messages_in_both_themes(cx: &mut TestAppContext) {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -474,7 +728,7 @@ mod tests {
             assert_eq!(chat.read(cx).session.state, RunState::Cancelled);
             window.render_frame(cx);
             window.click("reset", cx);
-            assert!(chat.read(cx).session.messages.is_empty());
+            assert!(chat.read(cx).session.messages().is_empty());
             assert_eq!(chat.read(cx).session.turns, 1);
             window.render_frame(cx);
             window.click("settings", cx);
@@ -482,6 +736,36 @@ mod tests {
             window.render_frame(cx);
             window.click("theme", cx);
             assert!(!chat.read(cx).settings.dark);
+            chat.update(cx, |chat, _| {
+                let run = chat.session.begin("Inspect").unwrap();
+                for id in ["success", "failure"] {
+                    chat.session.record_tool_call(run.id, ToolCall::new(
+                        id, "inspect", StructuredData::from_json(r#"{"path":"src/lib.rs"}"#, 256).unwrap()
+                    ).unwrap()).unwrap();
+                    let outcome = if id == "success" {
+                        ToolOutcome::Success(StructuredData::from_json(
+                            r#"{"files":[{"ok":true,"text":"[link](https://example.invalid)"}],"empty":null}"#, 256
+                        ).unwrap())
+                    } else { ToolOutcome::Failure(ToolError::Denied) };
+                    chat.session.record_tool_result(run.id, ToolResult::new(id, "inspect", outcome).unwrap()).unwrap();
+                }
+                chat.session.stop();
+            });
+            for _ in 0..2 {
+                window.render_frame(cx);
+                assert_eq!(window.find(("message", 1usize)).label(), Some("Tool call · inspect · success"));
+                assert_eq!(window.find(("message", 2usize)).label(), Some("Tool result · inspect · success · Success"));
+                assert_eq!(window.find(("message", 4usize)).label(), Some("Tool result · inspect · failure · Error"));
+                assert_eq!(window.within(("message", 2usize)).find("Output").label(), Some("Output: {} · 2 fields"));
+                assert_eq!(window.within(("message", 2usize)).find("\"files\"").label(), Some("\"files\": [] · 1 items"));
+                assert_eq!(window.within(("message", 2usize)).find("[0]").label(), Some("[0]: {} · 2 fields"));
+                assert_eq!(window.within(("message", 2usize)).find("\"ok\"").label(), Some("\"ok\": true"));
+                assert_eq!(window.within(("message", 2usize)).find("\"text\"").label(), Some("\"text\": \"[link](https://example.invalid)\""));
+                window.click("theme", cx);
+            }
+            window.click("reset", cx);
+            window.render_frame(cx);
+            assert!(window.try_find(("message", 2usize)).is_none());
         })
         .unwrap();
         runtime.shutdown_timeout(std::time::Duration::from_secs(1));

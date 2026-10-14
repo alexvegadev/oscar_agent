@@ -15,7 +15,13 @@ An experimental GPUI desktop proposal chat is available with
 `cargo +stable run -p oscar-code --features desktop`. It supports Markdown,
 multiline input, cancellation, reset and non-secret preferences. See
 [OSCAR Code](docs/oscar-code.md) for setup and implementation-plan status.
-Native provider text streaming is available in the CLI and desktop; model-initiated tools remain future work.
+Native provider text streaming is available in the CLI and desktop. Desktop
+**Settings → Enable autonomous tools** runs a bounded model → registry → model
+loop with the pure `text_stats` starter tool, typed nested results and live run
+events. OpenAI-compatible providers receive native tool schemas, `tool_calls`
+and correlated tool results with the `http` feature. The mock configuration works
+offline. CLI autonomy, repository actions
+and high-impact approval dialogs remain future work.
 
 Opt-in [RAG with Rig](docs/rag.md) retrieves cited chunks from explicitly loaded
 files using local Ollama embeddings:

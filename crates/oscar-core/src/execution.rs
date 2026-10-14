@@ -320,6 +320,8 @@ async fn execute_task(
         let result = tokio::time::timeout(
             Duration::from_millis(config.limits.call_timeout_ms),
             provider.infer(ModelRequest {
+                messages: Vec::new(),
+                tools: Vec::new(),
                 context: prompt,
                 max_output_bytes: config.limits.max_output_bytes,
                 max_output_tokens: config.limits.max_output_tokens,
@@ -343,6 +345,7 @@ async fn execute_task(
         }
         let failure = match result {
             Ok(output) => {
+                output.require_text()?;
                 if output.content.len() > config.limits.max_output_bytes {
                     return Err(OscarError::Limit("worker output exceeds byte limit".into()));
                 }

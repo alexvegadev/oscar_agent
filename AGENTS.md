@@ -120,14 +120,18 @@ integration is implied by the library registry. The release audit remains requir
 
 - [x] Feature-gated GPUI desktop proposal chat uses bounded existing inference,
   in-memory history, Markdown, cancellation/reset and non-secret preferences.
-  Native provider streaming is implemented; model-initiated tools and approval UI remain separate.
+  Native provider streaming and host-supplied typed tool messages with bounded
+  nested JSON rendering are implemented. Opt-in autonomous read-only registry
+  execution and live runtime events are implemented; approval UI remains separate.
 - [x] Interactive CLI proposal session supports explicit workspace file reads,
   follow-up context, bounded inference and reset without resetting budgets.
   Model-initiated tools, applying edits and the autonomous loop remain separate.
-- [ ] Bounded run loop supports model → tool → model flow.
-- [ ] Events and terminal outcomes are inspectable.
+- [x] Bounded desktop run loop supports model → registry tool → model flow.
+- [x] OpenAI-compatible providers exchange native schemas, streamed tool calls and
+  correlated tool results; proposal-only paths reject typed calls.
+- [x] Desktop runtime events and terminal outcomes are inspectable.
 - [ ] CLI can complete a mock-backed flow without credentials.
-- [ ] End-to-end tests cover malformed calls, tool failures, cancellation, and exhausted limits.
+- [x] Desktop end-to-end tests cover malformed calls, tool failures, cancellation, and exhausted limits.
 
 ### Gate E — Planning and memory
 

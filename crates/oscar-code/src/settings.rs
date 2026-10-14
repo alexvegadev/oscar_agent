@@ -10,6 +10,9 @@ pub struct Settings {
     pub max_turns: usize,
     pub timeout_ms: u64,
     pub provider: ProviderPreference,
+    /// Opt-in protocol/runtime. Side-effecting tools remain disabled.
+    pub autonomous: bool,
+    pub max_tool_calls: usize,
 }
 
 impl Default for Settings {
@@ -19,13 +22,18 @@ impl Default for Settings {
             max_turns: 32,
             timeout_ms: 60_000,
             provider: ProviderPreference::Local,
+            autonomous: false,
+            max_tool_calls: 16,
         }
     }
 }
 
 impl Settings {
     pub fn validate(&self, mode: WorkMode) -> Result<(), OscarError> {
-        if !(1..=256).contains(&self.max_turns) || !(1..=3_600_000).contains(&self.timeout_ms) {
+        if !(1..=256).contains(&self.max_turns)
+            || !(1..=3_600_000).contains(&self.timeout_ms)
+            || !(1..=64).contains(&self.max_tool_calls)
+        {
             return Err(OscarError::Config("desktop limits out of range".into()));
         }
         if matches!(

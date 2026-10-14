@@ -5029,6 +5029,7 @@ dependencies = [
  "gpui-pre",
  "oscar-core",
  "serde",
+ "serde_json",
  "tokio",
  "tokio-util",
  "toml 1.1.8+spec-1.1.0",
