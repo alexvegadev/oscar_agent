@@ -57,6 +57,10 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .build()?;
     let runtime_handle = runtime.handle().clone();
+    let (registry, tool_policy) = runtime.block_on(oscar_code::runtime::configured_tools(
+        &config,
+        Default::default(),
+    ))?;
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
@@ -92,7 +96,13 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
                         // startup failure rather than opening a broken session if it changes.
                         match Chat::new(config, settings, settings_path, runtime_handle, window, cx)
                         {
-                            Ok(chat) => chat,
+                            Ok(mut chat) => {
+                                if chat.set_tools(registry, tool_policy).is_err() {
+                                    eprintln!("oscar-code: cannot install configured tools");
+                                    std::process::exit(1);
+                                }
+                                chat
+                            }
                             Err(_) => {
                                 eprintln!("oscar-code: cannot initialize desktop session");
                                 std::process::exit(1);

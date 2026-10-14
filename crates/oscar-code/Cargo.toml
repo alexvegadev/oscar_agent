@@ -22,6 +22,7 @@ writeable = { version = "0.6", features = ["alloc"], optional = true }
 default = []
 desktop = ["dep:gpui", "dep:gpui-kit", "dep:writeable"]
 http = ["oscar-core/http"]
+mcp = ["http", "oscar-core/mcp"]
 ui-tests = ["desktop", "gpui/test-support", "gpui-kit/test-support"]
 
 [[bin]]

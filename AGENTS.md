@@ -156,7 +156,9 @@ integration is implied by the library registry. The release audit remains requir
 
 ### Gate F — Integrations and hardening
 
-- [ ] MCP capabilities use the common validation and policy path.
+- [x] Opt-in MCP stdio/Streamable HTTP tools use the common registry, supported
+  flat-schema validation, host allowlists, effects and bounded transport path.
+  OAuth, complex schemas and non-tool MCP capabilities remain separate.
 - [ ] Prompt-injection, credential, filesystem, resource, and side-effect risks have tests or documented mitigations.
 - [ ] Retry and telemetry behavior is bounded and configurable.
 

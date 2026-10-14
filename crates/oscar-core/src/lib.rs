@@ -2,6 +2,8 @@ pub mod config;
 pub mod context;
 pub mod error;
 pub mod execution;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod planning;
 pub mod providers;
 #[cfg(feature = "rag")]

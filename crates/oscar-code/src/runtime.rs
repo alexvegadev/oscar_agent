@@ -851,6 +851,39 @@ pub fn starter_policy() -> ToolPolicy {
         allow_side_effects: false,
     }
 }
+/// Prepare configured tools before entering the UI event loop. MCP is opt-in.
+pub async fn configured_tools(
+    config: &Config,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> Result<(Arc<ToolRegistry>, ToolPolicy), OscarError> {
+    let registry = starter_registry()
+        .map_err(|_| OscarError::Config("cannot register starter tools".into()))?;
+    let mut registry = Arc::try_unwrap(registry)
+        .map_err(|_| OscarError::Config("starter registry is already shared".into()))?;
+    #[cfg(feature = "mcp")]
+    {
+        registry = oscar_core::mcp::register_servers(registry, config, cancellation).await?;
+    }
+    #[cfg(not(feature = "mcp"))]
+    {
+        let _ = cancellation;
+        if config.features.mcp_enabled {
+            return Err(OscarError::Config(
+                "MCP registration requires the mcp Cargo feature".into(),
+            ));
+        }
+        let _ = &mut registry;
+    }
+    let policy = ToolPolicy {
+        allowed_tools: registry
+            .definitions()
+            .filter(|d| d.effect == Effect::ReadOnly)
+            .map(|d| d.name.clone())
+            .collect(),
+        allow_side_effects: false,
+    };
+    Ok((Arc::new(registry), policy))
+}
 /// Offline desktop demo uses the same inference and registry boundaries as real runs.
 pub fn demo_provider(run_id: u64, prompt: &str) -> Arc<dyn ModelProvider> {
     Arc::new(MockProvider::scripted_native(vec![

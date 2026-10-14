@@ -1,4 +1,5 @@
 mod agent;
+mod mcp;
 mod orchestration;
 mod repository;
 mod terminal;
@@ -17,6 +18,11 @@ struct CommandSpec {
 }
 
 const COMMANDS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "mcp",
+        build: mcp::command,
+        handle: mcp::handle,
+    },
     CommandSpec {
         name: "agent",
         build: agent::command,

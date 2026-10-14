@@ -135,6 +135,14 @@ Only one request is active. Context exhaustion asks the user to reset rather
 than silently dropping earlier messages. Raising the turn preference is an
 explicit host action; consumed turns never decrease.
 
+## MCP servers
+
+Build with `--features desktop,mcp` and configure explicit server/tool selections
+in the provider TOML. The desktop registers MCP tools before startup and exposes
+only host-declared read-only selections to autonomous runs. See [MCP setup](mcp.md)
+for stdio, Streamable HTTP, environment credentials, supported schemas and limits.
+The default configuration starts no MCP servers.
+
 ## Autonomous runtime and events
 
 Open **Settings**, select **Enable autonomous tools**, then **Send**. This is an

@@ -20,6 +20,13 @@ rig = { package = "rig-core", version = "=0.11.1", optional = true, default-feat
 default = []
 http = ["dep:reqwest", "dep:writeable"]
 rag = ["dep:rig", "dep:reqwest", "dep:writeable"]
+mcp = ["http", "tokio/process", "tokio/io-util"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "mcp_stdio"
+path = "tests/mcp_stdio.rs"
+harness = false
+required-features = ["mcp"]

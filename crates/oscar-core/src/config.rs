@@ -45,6 +45,8 @@ pub struct Config {
     pub routing: Routing,
     #[serde(default)]
     pub limits: Limits,
+    #[serde(default)]
+    pub mcp: McpSettings,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -187,6 +189,7 @@ impl Config {
         Ok(config)
     }
     pub fn validate(&self) -> Result<(), OscarError> {
+        self.mcp.validate()?;
         let bad = |s: &str| OscarError::Config(s.into());
         let l = &self.limits;
         if !(1..=256).contains(&l.max_tasks)
@@ -247,6 +250,163 @@ impl Config {
                 return Err(bad("mixed mode requires an enabled local provider"));
             }
             _ => {}
+        }
+        Ok(())
+    }
+}
+
+/// Host-owned MCP registration. Server metadata never controls permissions.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct McpSettings {
+    pub servers: std::collections::BTreeMap<String, McpServer>,
+    pub timeout_ms: u64,
+    pub max_response_bytes: usize,
+    pub max_discovered_tools: usize,
+    pub max_pages: usize,
+}
+impl Default for McpSettings {
+    fn default() -> Self {
+        Self {
+            servers: Default::default(),
+            timeout_ms: 10_000,
+            max_response_bytes: 65_536,
+            max_discovered_tools: 128,
+            max_pages: 8,
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTransport {
+    Stdio,
+    Http,
+}
+/// Debug hides URLs, arguments, paths and credential variable names.
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpServer {
+    #[serde(default)]
+    pub enabled: bool,
+    pub transport: McpTransport,
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+    /// Child variable -> host variable name. Values are never stored in TOML.
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+    pub url: Option<String>,
+    pub bearer_token_env: Option<String>,
+    /// Required for non-loopback HTTP, independently of model provider selection.
+    #[serde(default)]
+    pub allow_remote: bool,
+    /// Alias -> exact server tool name plus host-owned effect declaration.
+    #[serde(default)]
+    pub tools: std::collections::BTreeMap<String, McpTool>,
+}
+impl std::fmt::Debug for McpServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpServer")
+            .field("enabled", &self.enabled)
+            .field("transport", &self.transport)
+            .finish_non_exhaustive()
+    }
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpTool {
+    pub name: String,
+    pub effect: McpEffect,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpEffect {
+    ReadOnly,
+    SideEffect,
+}
+impl McpSettings {
+    pub fn validate(&self) -> Result<(), OscarError> {
+        let bad = || OscarError::Config("invalid MCP configuration; see docs/mcp.md".into());
+        let identifier = |s: &str, max| {
+            !s.is_empty()
+                && s.len() <= max
+                && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        };
+        let env_name = |s: &str| {
+            !s.is_empty()
+                && s.len() <= 128
+                && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        };
+        if self.servers.len() > 16
+            || !(1..=60_000).contains(&self.timeout_ms)
+            || !(256..=1_048_576).contains(&self.max_response_bytes)
+            || !(1..=128).contains(&self.max_discovered_tools)
+            || !(1..=32).contains(&self.max_pages)
+        {
+            return Err(bad());
+        }
+        let mut count = 0;
+        for (name, server) in &self.servers {
+            if !identifier(name, 24)
+                || server.tools.len() > 64
+                || server.args.len() > 32
+                || server
+                    .args
+                    .iter()
+                    .any(|s| s.len() > 4096 || s.contains('\0'))
+                || server.env.len() > 32
+                || server.env.iter().any(|(k, v)| !env_name(k) || !env_name(v))
+                || server
+                    .bearer_token_env
+                    .as_ref()
+                    .is_some_and(|s| !env_name(s))
+            {
+                return Err(bad());
+            }
+            for (alias, tool) in &server.tools {
+                if !identifier(alias, 32)
+                    || tool.name.is_empty()
+                    || tool.name.len() > 128
+                    || tool.name.chars().any(char::is_control)
+                {
+                    return Err(bad());
+                }
+            }
+            if !server.enabled {
+                continue;
+            }
+            count += server.tools.len();
+            if server.tools.is_empty() {
+                return Err(bad());
+            }
+            match server.transport {
+                McpTransport::Stdio
+                    if server.command.as_ref().is_none_or(|s| {
+                        s.trim().is_empty() || s.len() > 4096 || s.contains('\0')
+                    }) || server.url.is_some()
+                        || server.bearer_token_env.is_some()
+                        || server.allow_remote =>
+                {
+                    return Err(bad());
+                }
+                McpTransport::Http
+                    if server
+                        .url
+                        .as_ref()
+                        .is_none_or(|s| s.is_empty() || s.len() > 4096)
+                        || server.command.is_some()
+                        || !server.args.is_empty()
+                        || server.cwd.is_some()
+                        || !server.env.is_empty() =>
+                {
+                    return Err(bad());
+                }
+                _ => {}
+            }
+        }
+        if count > 127 {
+            return Err(bad());
         }
         Ok(())
     }

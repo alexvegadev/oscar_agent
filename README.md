@@ -4,7 +4,7 @@
 
 OSCAR aims to help developers build agents that can reason over a task, create and revise a plan, use explicitly registered tools, keep useful context, and report what they did. Its initial goal is a dependable local-first developer assistant with provider-independent model access and bounded, observable execution.
 
-> **Project status:** Hybrid planning and proposal execution are implemented. Workers can use local or remote models, pass artifacts, and report validation and inference usage. Automatic repository exploration, patch application, shell execution, MCP integration, and persistent sessions remain future work.
+> **Project status:** Hybrid planning and proposal execution are implemented. Workers can use local or remote models, pass artifacts, and report validation and inference usage. Automatic repository exploration, patch application, shell execution, and persistent sessions remain future work. Opt-in MCP tool registration is implemented for supported scalar schemas.
 
 Interactive coding proposals are available with `cargo run -p oscar-cli -- agent
 --workspace .`. Use `/read PATH` to load source files, then ask for edits and
@@ -22,6 +22,11 @@ events. OpenAI-compatible providers receive native tool schemas, `tool_calls`
 and correlated tool results with the `http` feature. The mock configuration works
 offline. CLI autonomy, repository actions
 and high-impact approval dialogs remain future work.
+
+Opt-in [MCP tools](docs/mcp.md) register selected local stdio and remote
+Streamable HTTP capabilities through the common registry. Build with `mcp`,
+configure explicit server/tool allowlists, and use `oscar mcp list` / `mcp check`
+to inspect registration. Desktop autonomous sessions can use read-only MCP tools.
 
 Opt-in [RAG with Rig](docs/rag.md) retrieves cited chunks from explicitly loaded
 files using local Ollama embeddings:
@@ -334,7 +339,8 @@ proposed TOML, Laya usage requirements, compatibility boundaries, and acceptance
 
 ### Integrations and hardening
 
-- [ ] Route MCP capabilities through the common tool validation and permission path.
+- [x] Register opt-in MCP stdio/Streamable HTTP tools through common validation and
+  permissions for supported scalar schemas; other MCP capabilities remain separate.
 - [x] Native OpenAI-compatible SSE streaming, bounded CLI/desktop previews and offline conformance tests.
 - [ ] Expand prompt-injection, credential, filesystem, and resource-limit testing.
 - [ ] Add rate scheduling, resumable execution, and telemetry only with explicit bounds and privacy controls.

@@ -1,0 +1,46 @@
+# Offline by default: replace paths/URLs and explicitly enable selected servers.
+work_mode = "mixed"
+
+
+[features]
+skills_enabled = false
+mcp_enabled = true
+
+[providers.local]
+enabled = true
+provider = "mock"
+model = "local-demo"
+context_window = 132000
+capabilities = ["code_generation", "code_analysis", "tool_use"]
+
+[mcp]
+timeout_ms = 10000
+max_response_bytes = 65536
+max_discovered_tools = 128
+max_pages = 8
+
+[mcp.servers.files]
+enabled = false
+transport = "stdio"
+command = 'C:\Program Files\nodejs\node.exe'
+args = ['C:\mcp\filesystem\dist\index.js', 'C:\projects\my-project']
+cwd = 'C:\projects\my-project'
+
+[mcp.servers.files.tools.read]
+name = "read_text_file"
+effect = "read_only"
+
+[mcp.servers.files.tools.list]
+name = "list_directory"
+effect = "read_only"
+
+[mcp.servers.docs]
+enabled = false
+transport = "http"
+url = "https://mcp.example.com/mcp"
+allow_remote = true
+bearer_token_env = "OSCAR_DOCS_MCP_TOKEN"
+
+[mcp.servers.docs.tools.search]
+name = "search_docs"
+effect = "read_only"

@@ -1102,3 +1102,23 @@ async fn native_answer_text_cannot_masquerade_as_an_executable_tool_call() {
             .any(|e| matches!(e.kind, RuntimeEventKind::ToolRequested(_)))
     );
 }
+
+#[tokio::test]
+async fn configured_tools_preserve_opt_in_and_starter_policy() {
+    let config = test_config();
+    let (registry, policy) = oscar_code::runtime::configured_tools(&config, Default::default())
+        .await
+        .unwrap();
+    assert_eq!(registry.definitions().count(), 1);
+    assert!(policy.allowed_tools.contains("text_stats"));
+    assert!(!policy.allow_side_effects);
+    #[cfg(not(feature = "mcp"))]
+    {
+        let mut config = config;
+        config.features.mcp_enabled = true;
+        assert!(matches!(
+            oscar_code::runtime::configured_tools(&config, Default::default()).await,
+            Err(OscarError::Config(_))
+        ));
+    }
+}

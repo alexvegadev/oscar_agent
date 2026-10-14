@@ -17,7 +17,7 @@ use oscar_core::{
     error::OscarError,
     planning::ProviderPreference,
     providers::Providers,
-    tools::ToolRegistry,
+    tools::{ToolPolicy, ToolRegistry},
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -25,6 +25,7 @@ pub struct Chat {
     session: SessionState,
     providers: Providers,
     registry: Arc<ToolRegistry>,
+    tool_policy: ToolPolicy,
     config: Config,
     settings: Settings,
     settings_path: PathBuf,
@@ -42,6 +43,21 @@ pub struct Chat {
 }
 
 impl Chat {
+    /// Install the host-prepared registry before accepting user input.
+    pub fn set_tools(
+        &mut self,
+        registry: Arc<ToolRegistry>,
+        policy: ToolPolicy,
+    ) -> Result<(), OscarError> {
+        if self.session.state.active() || policy.allow_side_effects {
+            return Err(OscarError::Config(
+                "cannot change active desktop tools or enable side effects".into(),
+            ));
+        }
+        self.registry = registry;
+        self.tool_policy = policy;
+        Ok(())
+    }
     pub fn new(
         config: Config,
         settings: Settings,
@@ -88,6 +104,7 @@ impl Chat {
             providers,
             registry: runtime::starter_registry()
                 .map_err(|_| OscarError::Config("cannot register desktop starter tools".into()))?,
+            tool_policy: runtime::starter_policy(),
             input,
             _input_subscription: input_subscription,
             turns: cx.new(|cx| {
@@ -303,7 +320,7 @@ impl Chat {
             &prompt,
             &self.config,
             self.registry.clone(),
-            runtime::starter_policy(),
+            self.tool_policy.clone(),
         ) {
             Ok(run) => run,
             Err(error) => {
