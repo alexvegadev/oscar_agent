@@ -20,14 +20,25 @@ visual review on a native display have not been verified.
 ## Interface and appearance
 
 The themed GPUI Kit interface has a workspace sidebar, a centered conversation,
-a focused composer, starter prompts, and a separate native **Settings** window.
+a focused composer, starter cards, and a separate native **Settings** window.
 The workspace uses GPUI Kit Dock: drag the divider between the sidebar and
-conversation to resize them. The sidebar starts at 220 pixels; the dock enforces
+conversation to resize them. The sidebar starts at 280 pixels; the dock enforces
 minimum pane sizes. Widths remain in memory across chat updates and conversation
 resets, and return to the default on restart.
-Both dark and light palettes use Kit theme tokens for surfaces, text, borders,
-and corner radii. Starter prompts fill the composer for review before sending.
-**Run events** opens a bounded activity panel. **New conversation** clears history
+Dark mode uses OSCAR's near-black palette (`#09090b` base, `#121214` sidebar,
+`#18181b` surfaces, `#27272a` borders) with blue (`#3b82f6`) accents.
+Both palettes use Kit theme roles; light mode remains supported. Inter and
+JetBrains Mono are selected when installed, with Kit's system font fallbacks.
+The composer has a blue border and 15% blue glow while its textarea is focused.
+Starter cards lift on hover and fill and focus the composer for review before
+sending. Their illustrative trace is explicitly labeled **Example**; it is not
+a tool execution. The session card shows actual turn consumption. The budget
+widget shows the configured output-token maximum and per-call timeout; token
+usage and remote cost are not currently reported by the desktop runtime.
+Composer context is shown in bytes against the enforced input byte limit.
+**Run events / Trace** (`Ctrl+E`) opens a bounded activity panel; **Settings**
+also opens with `Ctrl+,` while focus is in the chat.
+**New conversation** clears history
 while preserving execution budgets; it is the Reset action described below.
 
 ## Conversation

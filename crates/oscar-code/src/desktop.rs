@@ -6,7 +6,7 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Theme, ThemeMode,
+    ActiveTheme, Disableable,
     button::{Button, ButtonVariants},
     dock::{BasePanel, DockArea, DockLayout, DockSkin, Panel, PanelEvent, panel_handle},
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
@@ -23,6 +23,9 @@ use oscar_core::{
 };
 use std::{path::PathBuf, sync::Arc};
 
+mod appearance;
+mod view;
+
 pub struct Chat {
     dock_area: Entity<DockArea>,
     session: SessionState,
@@ -35,6 +38,7 @@ pub struct Chat {
     runtime: tokio::runtime::Handle,
     input: Entity<TextareaState>,
     _input_subscription: Subscription,
+    _input_focus_subscriptions: [Subscription; 2],
     turns: Entity<InputState>,
     timeout: Entity<InputState>,
     settings_window: Option<AnyWindowHandle>,
@@ -79,6 +83,11 @@ impl Chat {
             ));
         }
         let max_input_bytes = config.limits.max_input_bytes;
+        appearance::apply(settings.dark, cx);
+        cx.bind_keys([
+            KeyBinding::new("ctrl-e", view::ToggleEvents, Some("OscarChat")),
+            KeyBinding::new("ctrl-,", view::OpenSettings, Some("OscarChat")),
+        ]);
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Ask OSCAR for a coding proposal…")
@@ -104,6 +113,11 @@ impl Chat {
                 }
             },
         );
+        let focus = input.read(cx).focus_handle(cx);
+        let input_focus_subscriptions = [
+            cx.on_focus(&focus, window, |_, _, cx| cx.notify()),
+            cx.on_blur(&focus, window, |_, _, cx| cx.notify()),
+        ];
         // Construct the dock once so drag sizes survive chat updates and Reset.
         // Panels hold weak references: Chat owns the dock, which owns the panels.
         let chat = cx.entity();
@@ -113,7 +127,7 @@ impl Chat {
         let layout = DockLayout::h_split()
             .child(
                 DockLayout::tabs().panel_view(panel_handle(workspace), cx),
-                Some(px(220.)),
+                Some(px(280.)),
             )
             .child(
                 DockLayout::tabs().panel_view(panel_handle(conversation), cx),
@@ -132,6 +146,7 @@ impl Chat {
             tool_policy: runtime::starter_policy(),
             input,
             _input_subscription: input_subscription,
+            _input_focus_subscriptions: input_focus_subscriptions,
             turns: cx.new(|cx| {
                 InputState::new(window, cx)
                     .default_value(settings.max_turns.to_string())
@@ -338,7 +353,7 @@ impl Chat {
                 this.saving = false;
                 match result {
                     Ok(Ok(Ok(Ok(())))) => {
-                        Theme::change(if settings.dark { ThemeMode::Dark } else { ThemeMode::Light }, None, cx);
+                        appearance::apply(settings.dark, cx);
                         this.settings = settings.clone();
                         // No inference can start while saving.
                         if this.session.update_settings(settings).is_ok() {
@@ -791,133 +806,13 @@ impl Panel for ChatPanel {
 }
 
 impl Render for ChatPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.chat
             .update(cx, |chat, cx| match self.kind {
                 PanelKind::Workspace => chat.render_workspace(cx),
-                PanelKind::Conversation => chat.render_conversation(cx),
+                PanelKind::Conversation => chat.render_conversation(window, cx),
             })
             .unwrap_or_else(|_| div().into_any_element())
-    }
-}
-
-impl Chat {
-    fn render_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .size_full()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .p_4()
-            .bg(cx.theme().sidebar)
-            .border_r_1()
-            .border_color(cx.theme().sidebar_border)
-            .child(div().text_lg().py_2().child("OSCAR Code"))
-            .child(
-                Button::new("reset")
-                    .label("New conversation")
-                    .disabled(self.saving)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.session.reset();
-                        this.notice.clear();
-                        cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .mt_4()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("WORKSPACE"),
-            )
-            .child(
-                div()
-                    .p_3()
-                    .rounded(cx.theme().radius)
-                    .bg(cx.theme().sidebar_accent)
-                    .child("Current session")
-                    .child(
-                        div()
-                            .text_sm()
-                            .mt_2()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Conversation stays in memory"),
-                    ),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "Turns used · {} / {}",
-                        self.session.turns, self.settings.max_turns
-                    )),
-            )
-            .child(div().flex_1())
-            .child(
-                Button::new("events")
-                    .label("Run events")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.events_open = !this.events_open;
-                        cx.notify();
-                    })),
-            )
-            .child(Button::new("settings").label("Settings").on_click({
-                let chat = cx.entity();
-                move |_, _, cx| Self::open_preferences(chat.clone(), cx)
-            }))
-            .into_any_element()
-    }
-
-    fn render_conversation(&self, cx: &mut Context<Self>) -> AnyElement {
-        let active = self.session.state.active();
-        let model = self
-            .config
-            .providers
-            .get(self.settings.provider.key())
-            .map_or("Unavailable", |p| p.model.as_str());
-        div().size_full().min_w_0().flex().flex_col()
-                .child(div().px_6().py_4().border_b_1().border_color(cx.theme().border).flex().items_center().justify_between()
-                    .child(div().child(if self.settings.autonomous { "Autonomous · Read-only tools" } else { "Coding proposals" })
-                        .child(div().mt_1().text_sm().text_color(cx.theme().muted_foreground).child(format!("{:?} · {}", self.settings.provider, model))))
-                    .child(div().text_sm().text_color(cx.theme().muted_foreground).child(format!("{:?} · Run {}", self.session.state, self.session.run_id()))))
-                .when(self.events_open, |view| view.child(div().id("runtime-events").max_h(px(160.)).overflow_y_scroll().px_6().py_3().text_sm().bg(cx.theme().muted)
-                    .when(self.session.runtime_events().is_empty(), |view| view.child("No runtime events yet. Autonomous runs report their phases here."))
-                    .children(self.session.runtime_events().iter().map(|event| div().child(format!("#{} {}{}", event.sequence, event.phase, event.failure.map_or(String::new(), |failure| format!(" · {failure:?}"))))))))
-                .child(div().id("history").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.scroll).p_6()
-                    .child(div().w_full().max_w(px(840.)).mx_auto().flex().flex_col().gap_4()
-                        .when(self.session.messages().is_empty(), |view| view.child(div().mt(px(100.)).p_6().flex().flex_col().items_center().gap_4()
-                            .child(div().text_3xl().child("What would you like to build?"))
-                            .child(div().text_sm().text_color(cx.theme().muted_foreground).child("Explore an idea, solve a problem, or plan your next change."))
-                            .child(div().mt_4().flex().gap_2()
-                                .children([("idea", "Plan a feature", "Help me plan a new feature."), ("explain", "Explain code", "Help me understand a piece of code."), ("review", "Review an approach", "Help me review my implementation approach.")].into_iter().map(|(id, title, prompt)|
-                                    Button::new(id).label(title).disabled(active || self.saving).on_click(cx.listener(move |this, _, window, cx| {
-                                        this.input.update(cx, |input, cx| input.set_value(prompt, window, cx));
-                                        cx.notify();
-                                    })))))))
-                        .children(self.session.messages().iter().enumerate().map(|(i, m)| Self::message(i, m, cx)))
-                        .when(!self.session.preview.is_empty(), |view| view.child(Self::message(self.session.messages().len(), &Message::Model(self.session.preview.clone()), cx)))))
-                .child(div().px_6().pb_4().child(div().w_full().max_w(px(840.)).mx_auto().flex().flex_col().gap_2()
-                    .when(!self.notice.is_empty(), |view| view.child(div().text_sm().child(self.notice.clone())))
-                    .child(div().p_3().rounded(cx.theme().radius_lg).border_1().border_color(cx.theme().border).bg(cx.theme().muted)
-                        .child(Textarea::new(&self.input).w_full().disabled(active || self.saving).aria_label("Message OSCAR"))
-                        .child(div().mt_3().flex().justify_between().items_center()
-                            .child(div().text_sm().text_color(cx.theme().muted_foreground).child(if self.settings.autonomous { "Read-only tools enabled" } else { "Proposal mode" }))
-                            .child(if active { Button::new("stop").label("Stop Generation").on_click(cx.listener(|this, _, _, cx| { this.session.stop(); cx.notify(); })) }
-                                else { Button::new("submit").primary().label("Send").disabled(self.saving || self.input.read(cx).value().trim().is_empty()).on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))) })))
-                    .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Enter inserts a new line · New conversation preserves execution budgets"))))
-            .into_any_element()
-    }
-}
-
-impl Render for Chat {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .child(self.dock_area.clone())
     }
 }
 
@@ -929,7 +824,9 @@ mod tests {
         session::RunState,
         settings::Settings,
     };
-    use gpui::{AppContext, Bounds, TestAppContext, WindowBounds, WindowOptions, px, size};
+    use gpui::{
+        AppContext, Bounds, Focusable, TestAppContext, WindowBounds, WindowOptions, px, size,
+    };
     use std::sync::Arc;
 
     #[gpui::test]
@@ -1100,7 +997,7 @@ mod tests {
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                         None,
-                        size(px(1200.), px(900.)),
+                        size(px(860.), px(620.)),
                         cx,
                     ))),
                     ..Default::default()
@@ -1291,6 +1188,21 @@ mod tests {
             .unwrap()
         });
         cx.update_window(window, |_, window, cx| {
+            window.render_frame(cx);
+            let card_top = window.find("idea").bounds().top();
+            window.hover("idea", cx);
+            assert_eq!(window.find("idea").bounds().top(), card_top - px(4.));
+            window.click("idea", cx);
+            assert_eq!(chat.read(cx).input.read(cx).value().as_str(), "Help me plan a new feature.");
+            assert!(chat.read(cx).input.read(cx).focus_handle(cx).is_focused(window));
+            assert_eq!(chat.read(cx).session.state, RunState::Idle);
+            window.press("enter", cx);
+            assert!(chat.read(cx).input.read(cx).value().contains('\n'));
+            assert_eq!(chat.read(cx).session.turns, 0);
+            window.press("ctrl-e", cx);
+            assert!(chat.read(cx).events_open);
+            window.press("ctrl-e", cx);
+            assert!(!chat.read(cx).events_open);
             chat.update(cx, |chat, cx| {
                 chat.input.update(cx, |input, cx| {
                     input.set_value("Write a parser", window, cx)
