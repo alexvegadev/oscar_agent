@@ -137,6 +137,11 @@ integration is implied by the library registry. The release audit remains requir
 
 ### Gate E — Planning and memory
 
+- [x] Opt-in bounded CLI/DAG session JSONL journal, exact built-in HTTP request
+  capture, read-only hash verification and mandatory library-host proposal gates.
+  Desktop wiring, command/snapshot gates, patch transactions and persistent memory
+  remain separate. See docs/session-journal.md and ADR 0016.
+
 - [x] Opt-in Rig RAG for interactive agent sessions: explicitly loaded files,
   local embeddings, bounded cited evidence and reset without resetting budgets.
   Persistent vector storage and plan/run retrieval remain separate.

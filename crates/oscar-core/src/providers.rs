@@ -53,7 +53,7 @@ pub trait ModelProvider: Send + Sync {
         })
     }
 }
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct ModelRequest {
     pub context: String,
     /// Structured conversation. Empty keeps the legacy single-user context path.
@@ -79,7 +79,7 @@ pub struct TokenUsage {
     pub input: Option<u64>,
     pub output: Option<u64>,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ModelOutput {
     pub content: String,
     /// Proposed actions only; adapters never execute these calls.

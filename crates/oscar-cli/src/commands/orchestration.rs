@@ -7,6 +7,7 @@ use oscar_core::{
     execution::{self, CancellationToken, Outcome, Validators},
     planning::{Plan, inference, plan_request},
     providers::Providers,
+    session::{CaptureMode, Journal, JournalLimits},
 };
 use std::{
     fs::{self, OpenOptions},
@@ -82,6 +83,7 @@ async fn with_progress<T>(
 
 fn common(name: &'static str) -> Command {
     Command::new(name)
+        .arg(Arg::new("journal").long("journal").value_parser(["metadata", "content"]).help("Write bounded session.jsonl; content explicitly retains sensitive prompts and replies"))
         .arg(
             Arg::new("quiet")
                 .long("quiet")
@@ -216,9 +218,10 @@ fn handle(args: &ArgMatches, run: bool) -> Result<(), CliError> {
     })?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .max_blocking_threads(2)
         .build()
         .map_err(|_| OscarError::Config("cannot create async runtime".into()))?;
-    runtime.block_on(async {
+    let result = runtime.block_on(async {
         let cancel = CancellationToken::new();
         let signal = cancel.clone();
         let listener = tokio::spawn(async move {
@@ -226,6 +229,22 @@ fn handle(args: &ArgMatches, run: bool) -> Result<(), CliError> {
                 signal.cancel();
             }
         });
+        let journal = if let Some(mode) = args.get_one::<String>("journal") {
+            Some(
+                Journal::create(
+                    &path.join("session.jsonl"),
+                    if mode == "content" {
+                        CaptureMode::Content
+                    } else {
+                        CaptureMode::Metadata
+                    },
+                    JournalLimits::default(),
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
         let result = async {
             let uses_inference = args.get_one::<String>("plan").is_none()
                 && config.planning.mode == PlannerMode::Inference;
@@ -233,6 +252,10 @@ fn handle(args: &ArgMatches, run: bool) -> Result<(), CliError> {
                 Providers::from_config(&config)?
             } else {
                 Providers::default()
+            };
+            let providers = match &journal {
+                Some(journal) => providers.with_journal(journal.clone()),
+                None => providers,
             };
             let stage = if args.get_one::<String>("plan").is_some() {
                 "Loading and validating saved plan"
@@ -266,7 +289,18 @@ fn handle(args: &ArgMatches, run: bool) -> Result<(), CliError> {
                 plan.tasks.len()
             );
             let report = with_progress(quiet, &stage, async {
-                Ok(execution::execute(plan, config, providers, Validators::new(), cancel).await?)
+                Ok(execution::execute_with_options(
+                    plan,
+                    config,
+                    providers,
+                    Validators::new(),
+                    cancel,
+                    execution::ExecutionOptions {
+                        journal: journal.clone(),
+                        ..Default::default()
+                    },
+                )
+                .await?)
             })
             .await?;
             status(quiet, "Saving run report and artifacts");
@@ -274,8 +308,14 @@ fn handle(args: &ArgMatches, run: bool) -> Result<(), CliError> {
         }
         .await;
         listener.abort();
+        if let Some(journal) = journal {
+            journal.close().await?;
+        }
         result
-    })
+    });
+    // Pending filesystem work cannot be forcibly cancelled after an I/O timeout.
+    runtime.shutdown_timeout(Duration::from_millis(10));
+    result
 }
 fn write_report(path: &Path, report: execution::RunReport) -> Result<(), CliError> {
     let json = serde_json::to_string_pretty(&report)

@@ -5,6 +5,8 @@ use crate::{
     planning::{Confidence, Plan, ProviderPreference as P, Task, TaskId, ValidationStrategy},
     providers::{ModelRequest, Providers, TokenUsage},
     routing,
+    session::{Journal, JournalEvent},
+    validation::ValidationPolicy,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -100,6 +102,15 @@ struct RunContext {
     remote_slots: Semaphore,
     ledger: Mutex<Ledger>,
     cancel: CancellationToken,
+    run_id: String,
+    options: ExecutionOptions,
+}
+/// Host-owned controls, independent of model-produced plans. Providers should be
+/// wrapped with `Providers::with_journal` to capture planning and worker calls.
+#[derive(Clone, Default)]
+pub struct ExecutionOptions {
+    pub journal: Option<Journal>,
+    pub validation_policy: ValidationPolicy,
 }
 static RUN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -112,7 +123,29 @@ pub async fn execute(
     validators: Validators,
     cancel: CancellationToken,
 ) -> Result<RunReport, OscarError> {
+    execute_with_options(
+        plan,
+        config,
+        providers,
+        validators,
+        cancel,
+        ExecutionOptions::default(),
+    )
+    .await
+}
+
+/// Execute with mandatory host gates and optional durable lifecycle events.
+/// Preserves the legacy `execute` contract for proposal-only callers.
+pub async fn execute_with_options(
+    plan: Plan,
+    config: Config,
+    providers: Providers,
+    validators: Validators,
+    cancel: CancellationToken,
+    options: ExecutionOptions,
+) -> Result<RunReport, OscarError> {
     plan.validate(&config)?;
+    options.validation_policy.check_registry(&validators)?;
     for task in &plan.tasks {
         if let ValidationStrategy::Registered(name) = &task.validation
             && !validators.contains_key(name)
@@ -132,6 +165,13 @@ pub async fn execute(
         RUN_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     );
     let timeout = Duration::from_millis(config.limits.run_timeout_ms);
+    if let Some(journal) = &options.journal {
+        journal
+            .append(JournalEvent::RunStarted {
+                run_id: run_id.clone(),
+            })
+            .await?;
+    }
     let cap = |key| config.providers.get(key).map_or(1, |p| p.max_concurrency);
     let context = Arc::new(RunContext {
         local_slots: Semaphore::new(cap("local")),
@@ -145,6 +185,8 @@ pub async fn execute(
             ..Ledger::default()
         }),
         cancel,
+        run_id: run_id.clone(),
+        options,
     });
     let mut artifacts = ArtifactStore::new();
     let mut jobs = JoinSet::new();
@@ -162,6 +204,14 @@ pub async fn execute(
         Err(OscarError::Limit(_)) => Outcome::LimitReached,
         Err(_) => Outcome::Failed,
     };
+    if let Some(journal) = &context.options.journal {
+        journal
+            .append(JournalEvent::RunFinished {
+                run_id: run_id.clone(),
+                outcome,
+            })
+            .await?;
+    }
     let mut ledger = context.ledger.lock().await;
     for call in &mut ledger.calls {
         if call.status == "started" {
@@ -319,13 +369,20 @@ async fn execute_task(
         };
         let result = tokio::time::timeout(
             Duration::from_millis(config.limits.call_timeout_ms),
-            provider.infer(ModelRequest {
-                messages: Vec::new(),
-                tools: Vec::new(),
-                context: prompt,
-                max_output_bytes: config.limits.max_output_bytes,
-                max_output_tokens: config.limits.max_output_tokens,
-            }),
+            crate::session::provider::scope_attempt(
+                crate::session::AttemptOrigin {
+                    run_id: context.run_id.clone(),
+                    task_id: task.id.0.clone(),
+                    attempt,
+                },
+                provider.infer(ModelRequest {
+                    messages: Vec::new(),
+                    tools: Vec::new(),
+                    context: prompt,
+                    max_output_bytes: config.limits.max_output_bytes,
+                    max_output_tokens: config.limits.max_output_tokens,
+                }),
+            ),
         )
         .await
         .unwrap_or_else(|_| {
@@ -351,12 +408,29 @@ async fn execute_task(
                 }
                 let validation = tokio::time::timeout(
                     Duration::from_millis(config.limits.call_timeout_ms),
-                    validate(&task.validation, &output.content, &context.validators),
+                    validate_required(
+                        &task.validation,
+                        &output.content,
+                        &context.validators,
+                        &context.options.validation_policy,
+                    ),
                 )
                 .await
                 .map_err(|_| OscarError::Limit("validator deadline exceeded".into()))?;
-                let strong = matches!(task.validation, ValidationStrategy::Registered(_));
+                let strong = matches!(task.validation, ValidationStrategy::Registered(_))
+                    || !context.options.validation_policy.is_empty();
                 let passed = validation.is_ok();
+                if let Some(journal) = &context.options.journal {
+                    journal
+                        .append(JournalEvent::Validation {
+                            run_id: context.run_id.clone(),
+                            task: task.id.0.clone(),
+                            attempt,
+                            passed,
+                            strong,
+                        })
+                        .await?;
+                }
                 context.ledger.lock().await.events.push(Event::Validation {
                     task: task.id.clone(),
                     passed,
@@ -378,6 +452,11 @@ async fn execute_task(
                     });
                 }
                 if !passed {
+                    if !matches!(validation, Err(OscarError::Validation(_))) {
+                        // Cancellation, limits and infrastructure errors are not
+                        // quality failures and must never trigger model retries.
+                        validation?;
+                    }
                     OscarError::Validation("artifact failed declared validator; correct the output against its requirements".into())
                 } else {
                     OscarError::Validation("low confidence without strong deterministic evidence; revisit assumptions and missing context".into())
@@ -411,6 +490,38 @@ async fn execute_task(
         };
         previous = Some(decision.provider);
         tokio::time::sleep(Duration::from_millis(25 * local_failures as u64)).await;
+    }
+}
+async fn validate_required(
+    strategy: &ValidationStrategy,
+    content: &str,
+    validators: &Validators,
+    policy: &ValidationPolicy,
+) -> Result<(), OscarError> {
+    validate(strategy, content, validators)
+        .await
+        .map_err(validator_error)?;
+    for name in policy.required() {
+        if matches!(strategy, ValidationStrategy::Registered(selected) if selected == name) {
+            continue;
+        }
+        validators
+            .get(name)
+            .ok_or_else(|| OscarError::Config("required validator unavailable".into()))?
+            .validate(content)
+            .await
+            .map_err(validator_error)?;
+    }
+    Ok(())
+}
+fn validator_error(error: OscarError) -> OscarError {
+    match error {
+        OscarError::Cancelled => OscarError::Cancelled,
+        OscarError::Limit(_) => OscarError::Limit("host validator limit reached".into()),
+        OscarError::Validation(_) => {
+            OscarError::Validation("host validator rejected artifact".into())
+        }
+        _ => OscarError::Io("host validator infrastructure failed".into()),
     }
 }
 async fn validate(

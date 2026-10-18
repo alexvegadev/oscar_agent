@@ -11,6 +11,13 @@ Interactive coding proposals are available with `cargo run -p oscar-cli -- agent
 follow up in the same conversation. The example configuration uses mock replies.
 See [agent mode](docs/agent-mode.md) for real-provider setup, commands and limits.
 
+Opt-in [session journals](docs/session-journal.md) capture bounded, append-only
+execution traces: `plan`/`run --journal metadata|content`, or
+`agent --session-log PATH [--capture-session-content]`. Content capture requires
+explicit opt-in. Library hosts can require registered proposal validators through
+`ExecutionOptions`; command validators, safe patch application and persistent
+retrieval remain separate work.
+
 An experimental GPUI desktop proposal chat is available with
 `cargo +stable run -p oscar-code --features desktop`. It supports Markdown,
 multiline input, cancellation, reset, a themed sidebar/composer and a separate

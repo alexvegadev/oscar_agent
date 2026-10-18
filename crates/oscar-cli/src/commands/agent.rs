@@ -11,6 +11,7 @@ use oscar_core::{
     },
     providers::{ModelRequest, ModelTextSink, Providers},
     routing,
+    session::{CaptureMode, Journal, JournalEvent, JournalLimits},
     tools::{ToolError, ToolLimits, ToolPolicy},
 };
 use serde_json::{Value, json};
@@ -34,6 +35,8 @@ pub(super) fn command() -> Command {
         .arg(Arg::new("config").long("config").default_value("settings.toml"))
         .arg(Arg::new("workspace").long("workspace").default_value(".")
             .help("Explicit root for /read; relative paths only"))
+        .arg(Arg::new("session-log").long("session-log").help("New JSONL file in a trusted private directory; metadata only by default"))
+        .arg(Arg::new("capture-session-content").long("capture-session-content").requires("session-log").action(ArgAction::SetTrue).help("Explicitly retain sensitive prompts, evidence, tool results and replies"))
         .arg(Arg::new("allow-remote-context").long("allow-remote-context")
             .action(ArgAction::SetTrue)
             .help("Allow conversation and loaded files to reach remote inference, subject to TOML policy"));
@@ -101,6 +104,10 @@ pub(super) fn handle(args: &ArgMatches) -> Result<(), CliError> {
     );
     eprintln!("[oscar] Agent session {id}; edit proposals only. /help for commands.");
     let result = runtime.block_on(async {
+        let journal = if let Some(path) = args.get_one::<String>("session-log") {
+            Some(Journal::create(Path::new(path), if args.get_flag("capture-session-content") { CaptureMode::Content } else { CaptureMode::Metadata }, JournalLimits::default()).await?)
+        } else { None };
+        let providers = match &journal { Some(journal) => providers.with_journal(journal.clone()), None => providers };
         let cancel = CancellationToken::new();
         let signal = cancel.clone();
         let listener = tokio::spawn(async move {
@@ -158,7 +165,10 @@ pub(super) fn handle(args: &ArgMatches) -> Result<(), CliError> {
                 match line {
                     "/exit" | "/quit" => return Ok(()),
                     "/" | "/help" => println!("{HELP}"),
-                    "/reset" => { session.reset(); println!("Context cleared; budgets unchanged."); }
+                    "/reset" => {
+                        if let Some(journal) = &journal { journal.append(JournalEvent::ContextReset).await?; }
+                        session.reset(); println!("Context cleared; budgets unchanged.");
+                    }
                     "/status" => { println!("Turns: {}/{}; remote calls: {}; file calls: {}; context bytes: {}; local-only: {}",
                         session.turns, session.config.limits.max_tasks, session.remote_calls,
                         tools.calls_used(), session.context()?.len(), session.local_only);
@@ -169,7 +179,13 @@ pub(super) fn handle(args: &ArgMatches) -> Result<(), CliError> {
                         let path = line[6..].trim();
                         let call = json!({"id": format!("read-{}", tools.calls_used() + 1),
                             "name": "read_file", "arguments": {"path": path}}).to_string();
-                        match tools.execute_json(&call).await {
+                        let request = if let Some(journal) = &journal { Some(journal.append(JournalEvent::ToolRequested { payload: journal.payload(&call)? }).await?) } else { None };
+                        let result = tools.execute_json(&call).await;
+                        if let (Some(journal), Some(request)) = (&journal, request) {
+                            let payload = journal.payload(result.as_ref().map(String::as_str).unwrap_or("tool failed"))?;
+                            journal.append(JournalEvent::ToolFinished { request, succeeded: result.is_ok(), payload }).await?;
+                        }
+                        match result {
                             Ok(content) => {
                                 match session.load_file(path, content, &cancel).await {
                                     Ok(()) => println!("File loaded into context."),
@@ -200,6 +216,7 @@ pub(super) fn handle(args: &ArgMatches) -> Result<(), CliError> {
         };
         cancel.cancel();
         listener.abort();
+        if let Some(journal) = journal { journal.close().await?; }
         result
     });
     // Tokio stdin and OS file operations use blocking workers that cannot be

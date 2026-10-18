@@ -9,4 +9,6 @@ pub mod providers;
 #[cfg(feature = "rag")]
 pub mod rag;
 pub mod routing;
+pub mod session;
 pub mod tools;
+pub mod validation;

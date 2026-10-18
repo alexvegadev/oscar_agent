@@ -6,6 +6,46 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+#[test]
+fn explicit_session_log_preserves_reads_and_reset_without_changing_workspace() {
+    let root = fixture();
+    let path = root.join("session.jsonl");
+    let result = invoke(
+        &root,
+        "/read source.rs\nExplain PRIVATE_MARKER\n/reset\n/exit\n",
+        &[
+            "--session-log",
+            path.to_str().unwrap(),
+            "--capture-session-content",
+        ],
+    );
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let text = fs::read_to_string(&path).unwrap();
+    for expected in [
+        "tool_requested",
+        "tool_finished",
+        "context_reset",
+        "PRIVATE_MARKER",
+        "fn main()",
+        "closed",
+    ] {
+        assert!(text.contains(expected), "{expected}");
+    }
+    assert_eq!(
+        fs::read_to_string(root.join("source.rs")).unwrap(),
+        "fn main() {}\n"
+    );
+    assert!(
+        !invoke(&root, "/exit\n", &["--session-log", path.to_str().unwrap()])
+            .status
+            .success()
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), text);
+}
 fn fixture() -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../target")

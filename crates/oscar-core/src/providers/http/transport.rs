@@ -86,6 +86,9 @@ impl HttpClientExt for Transport {
             if parts.method != http_client::Method::POST || parts.uri != url.as_str() {
                 return Err(unsupported());
             }
+            crate::session::provider::record_wire_request(&body)
+                .await
+                .map_err(|_| unsupported())?;
             let response = client
                 .post(url.clone())
                 .headers(parts.headers)

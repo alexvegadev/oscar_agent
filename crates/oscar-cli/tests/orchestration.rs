@@ -5,6 +5,47 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+#[test]
+fn opt_in_journal_records_run_and_defaults_to_redacted_metadata() {
+    for mode in ["metadata", "content"] {
+        let dir = output_dir();
+        let config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../settings.toml");
+        let result = Command::new(env!("CARGO_BIN_EXE_oscar"))
+            .args([
+                "run",
+                "Write README PRIVATE_MARKER",
+                "--config",
+                config.to_str().unwrap(),
+                "--out",
+                dir.to_str().unwrap(),
+                "--journal",
+                mode,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let text = fs::read_to_string(dir.join("session.jsonl")).unwrap();
+        assert!(
+            text.contains("run_started")
+                && text.contains("run_finished")
+                && text.contains("closed")
+        );
+        assert_eq!(text.contains("PRIVATE_MARKER"), mode == "content");
+        let rows: Vec<serde_json::Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let request = rows
+            .iter()
+            .find(|r| r["event"]["kind"] == "request")
+            .unwrap();
+        assert_eq!(request["event"]["origin"]["task_id"], "T01");
+    }
+}
 fn output_dir() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../target")
